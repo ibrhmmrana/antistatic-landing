@@ -70,11 +70,12 @@ export default function StageCompetitorMap({
     libraries,
   });
 
-  // Smooth fitBounds - debounced to avoid excessive calls but ensures each competitor is visible
+  // Smooth fitBounds - only adjusts if new point is outside current viewport
   const throttledFitBounds = useCallback(
     (
       mapInstance: google.maps.Map,
       bounds: google.maps.LatLngBounds,
+      newPoint: google.maps.LatLng | null,
       isLast: boolean = false
     ) => {
       // Clear any pending fitBounds call
@@ -82,9 +83,19 @@ export default function StageCompetitorMap({
         clearTimeout(fitBoundsTimeoutRef.current);
       }
 
-      // Use a small delay to ensure marker is rendered, then fit bounds smoothly
+      // Use a small delay to ensure marker is rendered
       fitBoundsTimeoutRef.current = setTimeout(() => {
         try {
+          // Check if the new point is already visible in the current viewport
+          if (newPoint && !isLast) {
+            const bounds = mapInstance.getBounds();
+            if (bounds && bounds.contains(newPoint)) {
+              // Point is already visible, no need to adjust
+              return;
+            }
+          }
+
+          // Only adjust if point is outside viewport or it's the last competitor
           mapInstance.fitBounds(bounds, {
             top: 80,
             right: 80,
