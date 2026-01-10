@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const MIN_COMPETITORS = 3;
-const MAX_COMPETITORS = 8;
+const MAX_COMPETITORS = 10;
 const RADIUS_STEPS = [1500, 3000, 5000, 10000, 20000]; // 1.5km, 3km, 5km, 10km, 20km
 const MAX_PAGES = 3; // Google usually allows 3 pages max
 

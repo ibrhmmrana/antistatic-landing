@@ -93,8 +93,8 @@ export default function StageCompetitorMap({
 
         setTimeout(() => {
           const currentZoom = mapInstance.getZoom();
-          if (currentZoom && currentZoom < 12) {
-            mapInstance.setZoom(12);
+          if (currentZoom && currentZoom < 14) {
+            mapInstance.setZoom(14);
           }
         }, 100);
       } else {
@@ -110,8 +110,8 @@ export default function StageCompetitorMap({
 
           setTimeout(() => {
             const currentZoom = mapInstance.getZoom();
-            if (currentZoom && currentZoom < 12) {
-              mapInstance.setZoom(12);
+            if (currentZoom && currentZoom < 14) {
+              mapInstance.setZoom(14);
             }
           }, 100);
         }
@@ -238,9 +238,9 @@ export default function StageCompetitorMap({
       target.location.lng
     );
 
-    // Center map on target
+    // Center map on target with higher initial zoom
     map.panTo(targetLatLng);
-    map.setZoom(15);
+    map.setZoom(17);
 
     // Create custom icon with Google Maps pin inside circle
     const iconSvg = `
@@ -611,7 +611,7 @@ export default function StageCompetitorMap({
             minHeight: "500px",
           }}
           center={center}
-          zoom={15}
+          zoom={17}
           onLoad={onMapLoad}
           options={{
             disableDefaultUI: false,
