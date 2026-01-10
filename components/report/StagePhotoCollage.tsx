@@ -381,10 +381,17 @@ export default function StagePhotoCollage({
                       fill
                       className="object-cover"
                       unoptimized
+                      onLoad={() => {
+                        // Mark this image as loaded - use revealPosition to track by reveal order
+                        const revealPosition = revealOrder.get(index) ?? index;
+                        setLoadedImages(prev => new Set(prev).add(revealPosition));
+                      }}
                       onError={(e) => {
-                        // Hide broken images
+                        // Hide broken images, but still mark as "loaded" so animation continues
                         const target = e.target as HTMLImageElement;
                         target.style.display = 'none';
+                        const revealPosition = revealOrder.get(index) ?? index;
+                        setLoadedImages(prev => new Set(prev).add(revealPosition));
                       }}
                     />
                   </div>
