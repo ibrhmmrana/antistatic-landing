@@ -296,7 +296,7 @@ export default function StageCompetitorMap({
       ) {
         setStatus("complete");
         // Final fitBounds
-        if (boundsRef.current) {
+        if (boundsRef.current && map) {
           throttledFitBounds(map, boundsRef.current, true);
         }
         // Call onComplete callback after a short delay (handles both cases: with/without competitors)
