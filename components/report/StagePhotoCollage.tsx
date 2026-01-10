@@ -249,8 +249,8 @@ export default function StagePhotoCollage({
       return;
     }
 
-    // Fixed reveal interval: 140ms
-    const revealMs = 140;
+    // Fixed reveal interval: 250ms (slower animation)
+    const revealMs = 250;
     const photosToShow = data.photos.slice(0, MAX_PHOTOS);
     let currentCount = 0;
     
