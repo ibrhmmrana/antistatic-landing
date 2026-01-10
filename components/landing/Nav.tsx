@@ -12,17 +12,19 @@ export default function Nav() {
         {/* Right side */}
         <div className="flex items-center gap-4">
           <Link
-            href="/login"
+            href="#"
             className="text-sm text-gray-600 hover:text-gray-900 transition-colors px-3 py-2"
           >
-            Login
+            Pricing
           </Link>
-          <Link
-            href="/demo"
+          <a
+            href="https://app.antistatic.ai"
+            target="_blank"
+            rel="noopener noreferrer"
             className="text-sm bg-gray-900 text-white px-4 py-2 rounded-full hover:bg-gray-800 transition-colors"
           >
-            Get a demo
-          </Link>
+            Sign up
+          </a>
         </div>
       </div>
     </nav>
