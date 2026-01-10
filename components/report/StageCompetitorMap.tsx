@@ -104,10 +104,13 @@ export default function StageCompetitorMap({
           });
 
           // Clamp zoom after a brief delay to allow fitBounds to complete
+          // Only set minimum zoom if we're fitting bounds (zooming out), not when zooming in
           setTimeout(() => {
             const currentZoom = mapInstance.getZoom();
-            if (currentZoom && currentZoom < 12) {
-              mapInstance.setZoom(12);
+            // Only enforce minimum zoom if we had to zoom out significantly
+            // This allows natural zooming out when competitors are far away
+            if (currentZoom && currentZoom < 13) {
+              mapInstance.setZoom(13);
             }
           }, 150);
         } catch (error) {
