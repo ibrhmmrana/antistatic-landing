@@ -31,7 +31,7 @@ export default function PrivacyPolicy() {
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-2">Privacy Policy</h1>
           <p className="text-gray-600 mb-8 text-sm md:text-base">Effective date: January 10, 2026</p>
 
-        <div className="prose prose-lg max-w-none">
+        <div className="prose prose-lg max-w-none bg-white/80 backdrop-blur-sm rounded-2xl p-8 md:p-12 shadow-xl border border-gray-100">
           <section className="mb-8">
             <h2 className="text-2xl font-semibold text-gray-900 mt-8 mb-4">1) Who we are</h2>
             <p className="text-gray-700 leading-relaxed">
