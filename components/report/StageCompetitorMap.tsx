@@ -70,32 +70,37 @@ export default function StageCompetitorMap({
     libraries,
   });
 
-  // Smooth fitBounds - only adjusts if new point is outside current viewport
+  // Throttled fitBounds - only call every 2 markers or after last marker
   const throttledFitBounds = useCallback(
     (
       mapInstance: google.maps.Map,
       bounds: google.maps.LatLngBounds,
-      newPoint: google.maps.LatLng | null,
       isLast: boolean = false
     ) => {
-      // Clear any pending fitBounds call
       if (fitBoundsTimeoutRef.current) {
         clearTimeout(fitBoundsTimeoutRef.current);
       }
 
-      // Use a small delay to ensure marker is rendered
-      fitBoundsTimeoutRef.current = setTimeout(() => {
-        try {
-          // Check if the new point is already visible in the current viewport
-          if (newPoint && !isLast) {
-            const bounds = mapInstance.getBounds();
-            if (bounds && bounds.contains(newPoint)) {
-              // Point is already visible, no need to adjust
-              return;
-            }
-          }
+      // Call immediately if it's the last marker, otherwise throttle
+      if (isLast) {
+        fitBoundsCounterRef.current = 0;
+        mapInstance.fitBounds(bounds, {
+          top: 80,
+          right: 80,
+          bottom: 80,
+          left: 80,
+        });
 
-          // Only adjust if point is outside viewport or it's the last competitor
+        setTimeout(() => {
+          const currentZoom = mapInstance.getZoom();
+          if (currentZoom && currentZoom < 12) {
+            mapInstance.setZoom(12);
+          }
+        }, 100);
+      } else {
+        fitBoundsCounterRef.current += 1;
+        if (fitBoundsCounterRef.current >= 2) {
+          fitBoundsCounterRef.current = 0;
           mapInstance.fitBounds(bounds, {
             top: 80,
             right: 80,
@@ -103,20 +108,14 @@ export default function StageCompetitorMap({
             left: 80,
           });
 
-          // Clamp zoom after a brief delay to allow fitBounds to complete
-          // Only set minimum zoom if we're fitting bounds (zooming out), not when zooming in
           setTimeout(() => {
             const currentZoom = mapInstance.getZoom();
-            // Only enforce minimum zoom if we had to zoom out significantly
-            // This allows natural zooming out when competitors are far away
-            if (currentZoom && currentZoom < 13) {
-              mapInstance.setZoom(13);
+            if (currentZoom && currentZoom < 12) {
+              mapInstance.setZoom(12);
             }
-          }, 150);
-        } catch (error) {
-          console.error("Error fitting bounds:", error);
+          }, 100);
         }
-      }, isLast ? 0 : 50); // Immediate for last, small delay for others to batch rapid updates
+      }
     },
     []
   );
@@ -239,9 +238,9 @@ export default function StageCompetitorMap({
       target.location.lng
     );
 
-    // Center map on target with higher zoom (more zoomed in)
+    // Center map on target
     map.panTo(targetLatLng);
-    map.setZoom(16);
+    map.setZoom(15);
 
     // Create custom icon with Google Maps pin inside circle
     const iconSvg = `
@@ -298,7 +297,7 @@ export default function StageCompetitorMap({
         setStatus("complete");
         // Final fitBounds
         if (boundsRef.current && map) {
-          throttledFitBounds(map, boundsRef.current, null, true);
+          throttledFitBounds(map, boundsRef.current, true);
         }
         // Call onComplete callback after a short delay (handles both cases: with/without competitors)
         // Note: If there are competitors, onComplete will also be called when last pin drops
@@ -443,22 +442,11 @@ export default function StageCompetitorMap({
         badgeOverlay.setMap(map);
         competitorInfoWindowsRef.current.push(badgeOverlay as any);
 
-        // Extend bounds and adjust map to show new competitor
+        // Extend bounds
         if (boundsRef.current && map) {
-          // Create LatLng object for the competitor location
-          const competitorLatLng = new google.maps.LatLng(
-            competitor.location.lat,
-            competitor.location.lng
-          );
-          
-          // Extend bounds to include this competitor
-          boundsRef.current.extend(competitorLatLng);
-          
+          boundsRef.current.extend(competitor.location);
           const isLast = updated.length === data.competitors.length;
-          
-          // Only adjust map if the new competitor is outside current viewport
-          // This prevents glitchy resets to business location
-          throttledFitBounds(map, boundsRef.current, competitorLatLng, isLast);
+          throttledFitBounds(map, boundsRef.current, isLast);
           
           // If this is the last competitor, call onComplete after a short delay
           if (isLast && !onCompleteCalledRef.current) {
@@ -623,7 +611,7 @@ export default function StageCompetitorMap({
             minHeight: "500px",
           }}
           center={center}
-          zoom={16}
+          zoom={15}
           onLoad={onMapLoad}
           options={{
             disableDefaultUI: false,
