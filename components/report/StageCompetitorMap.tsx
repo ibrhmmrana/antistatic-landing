@@ -623,7 +623,7 @@ export default function StageCompetitorMap({
             minHeight: "500px",
           }}
           center={center}
-          zoom={15}
+          zoom={16}
           onLoad={onMapLoad}
           options={{
             disableDefaultUI: false,
