@@ -70,37 +70,21 @@ export default function StageCompetitorMap({
     libraries,
   });
 
-  // Throttled fitBounds - only call every 2 markers or after last marker
+  // Smooth fitBounds - debounced to avoid excessive calls but ensures each competitor is visible
   const throttledFitBounds = useCallback(
     (
       mapInstance: google.maps.Map,
       bounds: google.maps.LatLngBounds,
       isLast: boolean = false
     ) => {
+      // Clear any pending fitBounds call
       if (fitBoundsTimeoutRef.current) {
         clearTimeout(fitBoundsTimeoutRef.current);
       }
 
-      // Call immediately if it's the last marker, otherwise throttle
-      if (isLast) {
-        fitBoundsCounterRef.current = 0;
-        mapInstance.fitBounds(bounds, {
-          top: 80,
-          right: 80,
-          bottom: 80,
-          left: 80,
-        });
-
-        setTimeout(() => {
-          const currentZoom = mapInstance.getZoom();
-          if (currentZoom && currentZoom < 12) {
-            mapInstance.setZoom(12);
-          }
-        }, 100);
-      } else {
-        fitBoundsCounterRef.current += 1;
-        if (fitBoundsCounterRef.current >= 2) {
-          fitBoundsCounterRef.current = 0;
+      // Use a small delay to ensure marker is rendered, then fit bounds smoothly
+      fitBoundsTimeoutRef.current = setTimeout(() => {
+        try {
           mapInstance.fitBounds(bounds, {
             top: 80,
             right: 80,
@@ -108,14 +92,17 @@ export default function StageCompetitorMap({
             left: 80,
           });
 
+          // Clamp zoom after a brief delay to allow fitBounds to complete
           setTimeout(() => {
             const currentZoom = mapInstance.getZoom();
             if (currentZoom && currentZoom < 12) {
               mapInstance.setZoom(12);
             }
-          }, 100);
+          }, 150);
+        } catch (error) {
+          console.error("Error fitting bounds:", error);
         }
-      }
+      }, isLast ? 0 : 50); // Immediate for last, small delay for others to batch rapid updates
     },
     []
   );
