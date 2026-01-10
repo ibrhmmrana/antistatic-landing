@@ -295,7 +295,7 @@ export default function StageCompetitorMap({
         setStatus("complete");
         // Final fitBounds
         if (boundsRef.current && map) {
-          throttledFitBounds(map, boundsRef.current, true);
+          throttledFitBounds(map, boundsRef.current, null, true);
         }
         // Call onComplete callback after a short delay (handles both cases: with/without competitors)
         // Note: If there are competitors, onComplete will also be called when last pin drops
