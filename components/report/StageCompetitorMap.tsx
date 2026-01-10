@@ -59,7 +59,7 @@ export default function StageCompetitorMap({
   const fitBoundsCounterRef = useRef(0);
   const businessMarkerRef = useRef<google.maps.Marker | null>(null);
   const competitorMarkersRef = useRef<google.maps.Marker[]>([]);
-  const competitorInfoWindowsRef = useRef<google.maps.InfoWindow[]>([]);
+  const competitorInfoWindowsRef = useRef<google.maps.OverlayView[]>([]);
   const mapInitializedRef = useRef(false);
   const onCompleteCalledRef = useRef(false);
 
