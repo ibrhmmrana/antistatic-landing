@@ -429,10 +429,20 @@ export default function StageCompetitorMap({
         badgeOverlay.setMap(map);
         competitorInfoWindowsRef.current.push(badgeOverlay as any);
 
-        // Extend bounds
+        // Extend bounds and adjust map to show new competitor
         if (boundsRef.current && map) {
-          boundsRef.current.extend(competitor.location);
+          // Create LatLng object for the competitor location
+          const competitorLatLng = new google.maps.LatLng(
+            competitor.location.lat,
+            competitor.location.lng
+          );
+          
+          // Extend bounds to include this competitor
+          boundsRef.current.extend(competitorLatLng);
+          
           const isLast = updated.length === data.competitors.length;
+          
+          // Always call fitBounds to ensure the new competitor is visible
           throttledFitBounds(map, boundsRef.current, isLast);
           
           // If this is the last competitor, call onComplete after a short delay
