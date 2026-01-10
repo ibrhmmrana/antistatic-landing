@@ -453,8 +453,9 @@ export default function StageCompetitorMap({
           
           const isLast = updated.length === data.competitors.length;
           
-          // Always call fitBounds to ensure the new competitor is visible
-          throttledFitBounds(map, boundsRef.current, isLast);
+          // Only adjust map if the new competitor is outside current viewport
+          // This prevents glitchy resets to business location
+          throttledFitBounds(map, boundsRef.current, competitorLatLng, isLast);
           
           // If this is the last competitor, call onComplete after a short delay
           if (isLast && !onCompleteCalledRef.current) {
