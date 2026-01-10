@@ -3,14 +3,35 @@ export const metadata = {
   description: "How to request deletion of your personal data from Antistatic",
 };
 
+import Nav from "@/components/landing/Nav";
+import Image from "next/image";
+
 export default function DataDeletion() {
   return (
-    <div className="min-h-screen bg-white">
-      <div className="max-w-4xl mx-auto px-6 py-12 md:py-16">
-        <h1 className="text-4xl font-bold text-gray-900 mb-2">Data Deletion Instructions</h1>
-        <p className="text-gray-600 mb-8">Effective date: January 10, 2026</p>
+    <div className="relative min-h-screen">
+      {/* Background Image */}
+      <div className="fixed inset-0 z-0">
+        <Image
+          src="/images/Most-Advanced-TPU_1.max-2500x2500 (1).png"
+          alt="Background"
+          fill
+          priority
+          className="object-cover"
+          quality={90}
+          style={{ opacity: 1 }}
+        />
+        {/* Overlay for better text readability */}
+        <div className="absolute inset-0 bg-white/95" />
+      </div>
 
-        <div className="prose prose-lg max-w-none">
+      {/* Content */}
+      <div className="relative z-10">
+        <Nav />
+        <div className="max-w-4xl mx-auto px-6 py-12 md:py-16">
+          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-2">Data Deletion Instructions</h1>
+          <p className="text-gray-600 mb-8 text-sm md:text-base">Effective date: January 10, 2026</p>
+
+        <div className="prose prose-lg max-w-none bg-white/80 backdrop-blur-sm rounded-2xl p-8 md:p-12 shadow-xl border border-gray-100">
           <p className="text-gray-700 leading-relaxed mb-8">
             Antistatic provides an email-based process to request deletion of personal data and connected platform data.
           </p>
