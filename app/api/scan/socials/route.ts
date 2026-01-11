@@ -158,6 +158,160 @@ async function captureSocialScreenshot(
 }
 
 /**
+ * Extracts social media profile links from a business website.
+ * 
+ * This approach avoids Google search CAPTCHAs by directly visiting the business website
+ * and scanning for social media links (typically found in headers/footers).
+ * 
+ * @param websiteUrl - The business website URL to scan
+ * @returns Promise resolving to an array of social media links found
+ */
+async function extractSocialLinksFromWebsite(
+  websiteUrl: string
+): Promise<{ platform: string; url: string }[]> {
+  let browser: Browser | null = null;
+
+  try {
+    // Configure serverless Chromium for production (Vercel/Lambda)
+    const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const localExecutablePath = process.env.CHROMIUM_EXECUTABLE_PATH;
+    const executablePath = isServerless
+      ? await chromium.executablePath()
+      : (localExecutablePath || undefined);
+
+    browser = await pwChromium.launch({
+      headless: chromium.headless,
+      args: chromium.args,
+      executablePath,
+      timeout: 30000,
+    });
+
+    const userAgent = getRandomUserAgent();
+    const context = await browser.newContext({
+      viewport: { width: 1920, height: 1080 },
+      userAgent,
+      deviceScaleFactor: 1,
+      isMobile: false,
+      hasTouch: false,
+      javaScriptEnabled: true,
+    });
+    
+    const page = await context.newPage();
+    context.setDefaultTimeout(DEFAULT_ACTION_TIMEOUT_MS);
+    context.setDefaultNavigationTimeout(DEFAULT_NAV_TIMEOUT_MS);
+
+    // Normalize URL
+    let normalizedUrl = websiteUrl.trim();
+    if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+      normalizedUrl = `https://${normalizedUrl}`;
+    }
+
+    console.log(`[SOCIAL EXTRACTOR] Navigating to business website: ${normalizedUrl}`);
+
+    try {
+      await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAV_TIMEOUT_MS });
+    } catch (navError) {
+      console.warn(`[SOCIAL EXTRACTOR] Navigation error, trying with http:`, navError);
+      // Try http if https fails
+      if (normalizedUrl.startsWith('https://')) {
+        normalizedUrl = normalizedUrl.replace('https://', 'http://');
+        await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAV_TIMEOUT_MS });
+      } else {
+        throw navError;
+      }
+    }
+
+    // Wait for page to settle
+    await randomDelay(1000, 2000);
+
+    // Collect social media links
+    const socialLinks: { platform: string; url: string }[] = [];
+    const seenUrls = new Set<string>();
+
+    // Look for social media links on the page
+    const socialLinkSelectors = [
+      'a[href*="instagram.com"]',
+      'a[href*="facebook.com"]',
+    ];
+
+    for (const selector of socialLinkSelectors) {
+      const links = await page.locator(selector).all();
+      console.log(`[SOCIAL EXTRACTOR] Found ${links.length} links matching ${selector}`);
+      
+      for (const link of links) {
+        try {
+          let href = await link.getAttribute('href');
+          if (!href) continue;
+
+          // Clean up URL
+          href = href.trim();
+          
+          // Skip invalid or internal links
+          if (href.startsWith('#') || href.startsWith('javascript:')) continue;
+          
+          // Determine platform
+          let platform: string | null = null;
+          if (href.includes('instagram.com')) {
+            platform = 'instagram';
+          } else if (href.includes('facebook.com')) {
+            platform = 'facebook';
+          }
+
+          if (platform && !seenUrls.has(href)) {
+            seenUrls.add(href);
+            socialLinks.push({ platform, url: href });
+            console.log(`[SOCIAL EXTRACTOR] Found ${platform} link: ${href}`);
+          }
+        } catch {
+          // Skip problematic links
+        }
+      }
+    }
+
+    // Also check common footer/header areas
+    const footerLinks = await page.locator('footer a[href*="instagram.com"], footer a[href*="facebook.com"], header a[href*="instagram.com"], header a[href*="facebook.com"]').all();
+    console.log(`[SOCIAL EXTRACTOR] Found ${footerLinks.length} social links in header/footer`);
+
+    for (const link of footerLinks) {
+      try {
+        let href = await link.getAttribute('href');
+        if (!href || seenUrls.has(href)) continue;
+
+        let platform: string | null = null;
+        if (href.includes('instagram.com')) {
+          platform = 'instagram';
+        } else if (href.includes('facebook.com')) {
+          platform = 'facebook';
+        }
+
+        if (platform) {
+          seenUrls.add(href);
+          socialLinks.push({ platform, url: href });
+          console.log(`[SOCIAL EXTRACTOR] Found ${platform} link in footer/header: ${href}`);
+        }
+      } catch {
+        // Skip problematic links
+      }
+    }
+
+    await context.close();
+    console.log(`[SOCIAL EXTRACTOR] ✅ Extracted ${socialLinks.length} social links from website`);
+    return socialLinks;
+
+  } catch (error) {
+    console.error(`[SOCIAL EXTRACTOR] ❌ Error extracting social links:`, error);
+    return [];
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+  }
+}
+
+/**
+ * @deprecated This function navigates to Google Search which triggers CAPTCHAs.
+ * Use extractSocialLinksFromWebsite() instead.
+ * 
  * Extracts social media profile links and website URL from a Google Business Profile (GBP) knowledge panel.
  * 
  * This function:
@@ -900,17 +1054,23 @@ export async function POST(request: NextRequest) {
 
     // Create the scraper execution promise
     const scraperPromise = (async () => {
-      // Call the extraction function
-      const extractionResult = await extractSocialLinksFromGBP(businessName, address);
+      // NEW APPROACH: Extract social links from business website instead of Google Search
+      // This avoids CAPTCHAs that occur when navigating to Google Search
+      
+      // Use the website URL provided from Google Places API
+      const websiteUrlToUse = providedWebsiteUrl || null;
+      console.log(`[API] Website URL from Places API: ${websiteUrlToUse || 'none'}`);
 
-    // Clean and deduplicate the links
-    const socialLinks = cleanAndDeduplicateSocialLinks(extractionResult.socialLinks);
-
-    // Determine website URL to use:
-    // 1. Use URL from GBP scraping if found
-    // 2. Fall back to URL provided from Google Places API (more reliable when scraping fails)
-    const websiteUrlToUse = extractionResult.websiteUrl || providedWebsiteUrl || null;
-    console.log(`[API] Website URL - from GBP: ${extractionResult.websiteUrl || 'none'}, from Places API: ${providedWebsiteUrl || 'none'}, using: ${websiteUrlToUse || 'none'}`);
+      // Extract social links from the business website (if available)
+      let socialLinks: { platform: string; url: string }[] = [];
+      if (websiteUrlToUse) {
+        console.log(`[API] Extracting social links from website: ${websiteUrlToUse}`);
+        const extractedLinks = await extractSocialLinksFromWebsite(websiteUrlToUse);
+        socialLinks = cleanAndDeduplicateSocialLinks(extractedLinks);
+        console.log(`[API] Found ${socialLinks.length} social links from website`);
+      } else {
+        console.log(`[API] No website URL available, skipping social link extraction`);
+      }
 
     // Now capture screenshots in parallel after links are extracted
     const screenshotPromises: Promise<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' } | { websiteScreenshot: string | null }>[] = [];
@@ -964,7 +1124,6 @@ export async function POST(request: NextRequest) {
         websiteUrl: websiteUrlToUse,
         websiteScreenshot,
         count: socialLinks.length,
-        rawCount: extractionResult.socialLinks.length,
         scanId,
       };
       

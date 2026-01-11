@@ -266,21 +266,21 @@ export default function StageOnlinePresence({
     );
   };
 
-  // Social Media Screenshot inside a refined iPhone-style mock
+  // Social Media Screenshot inside a refined iPhone-style mock (White version)
   const SocialScreenshot = ({ screenshot, platform }: { screenshot: string | null; platform: 'instagram' | 'facebook' }) => (
     <div className="relative">
-      <div className="relative rounded-[2.5rem] bg-gradient-to-br from-[#0f172a] via-[#111827] to-[#0b1220] shadow-2xl border border-[#1f2937] px-1.5 pt-3 pb-1">
-        {/* Side buttons */}
-        <div className="absolute -left-[2px] top-16 h-8 w-[2px] rounded-l-sm bg-[#334155]" />
-        <div className="absolute -left-[2px] top-28 h-12 w-[2px] rounded-l-sm bg-[#334155]" />
-        <div className="absolute -left-[2px] top-44 h-12 w-[2px] rounded-l-sm bg-[#334155]" />
-        <div className="absolute -right-[2px] top-32 h-16 w-[2px] rounded-r-sm bg-[#334155]" />
+      <div className="relative rounded-[2.2rem] bg-gradient-to-br from-[#f8fafc] via-[#f1f5f9] to-[#e2e8f0] shadow-xl border border-gray-200/80 px-1 pt-2 pb-0.5">
+        {/* Side buttons - thinner */}
+        <div className="absolute -left-[1px] top-16 h-6 w-[1px] rounded-l-sm bg-gray-300" />
+        <div className="absolute -left-[1px] top-26 h-10 w-[1px] rounded-l-sm bg-gray-300" />
+        <div className="absolute -left-[1px] top-40 h-10 w-[1px] rounded-l-sm bg-gray-300" />
+        <div className="absolute -right-[1px] top-28 h-12 w-[1px] rounded-r-sm bg-gray-300" />
         
-        {/* Notch */}
-        <div className="absolute top-1 left-1/2 -translate-x-1/2 w-24 h-5 bg-[#0b0f17] rounded-b-2xl z-20" />
+        {/* Dynamic Island / Notch */}
+        <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-14 h-3 bg-gray-400 rounded-full z-20" />
         
         {/* Screen */}
-        <div className="relative bg-black rounded-[2.2rem] overflow-hidden aspect-[9/19.5] border border-[#1f2937]/60">
+        <div className="relative bg-white rounded-[1.8rem] overflow-hidden aspect-[9/19.5] border border-gray-200/60">
           {screenshot ? (
             <img
               src={screenshot}
@@ -288,12 +288,12 @@ export default function StageOnlinePresence({
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-              <div className="text-gray-500 text-xs">Loading {platform}...</div>
+            <div className="w-full h-full bg-gray-50 flex items-center justify-center">
+              <div className="text-gray-400 text-xs">Loading {platform}...</div>
             </div>
           )}
           {/* Bottom home indicator */}
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-20 h-1 bg-white/30 rounded-full" />
+          <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-16 h-1 bg-black/20 rounded-full" />
         </div>
       </div>
     </div>
