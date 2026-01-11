@@ -389,13 +389,32 @@ async function removeFacebookLoginPrompt(page: Page): Promise<void> {
 async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
   console.log(`[SCREENSHOT] Checking for Instagram login page...`);
   
-  // Check for login form indicators using the exact selectors
+  // Wait a bit for page to fully load
+  await page.waitForTimeout(2000);
+  
+  // Check for login form indicators - try multiple selector strategies
   const loginDetected = await page.evaluate(() => {
-    const usernameInput = document.querySelector('input[name="username"][aria-label*="Phone number, username, or email"]') as HTMLInputElement;
-    const passwordInput = document.querySelector('input[name="password"][aria-label="Password"]') as HTMLInputElement;
+    // Try exact selector first
+    let usernameInput = document.querySelector('input[name="username"][aria-label*="Phone number, username, or email"]') as HTMLInputElement;
+    let passwordInput = document.querySelector('input[name="password"][aria-label="Password"]') as HTMLInputElement;
     
-    // Check if both inputs exist
-    return !!(usernameInput && passwordInput);
+    // Fallback: try just by name attribute
+    if (!usernameInput) {
+      usernameInput = document.querySelector('input[name="username"]') as HTMLInputElement;
+    }
+    if (!passwordInput) {
+      passwordInput = document.querySelector('input[name="password"]') as HTMLInputElement;
+    }
+    
+    // Check if both inputs exist and are visible
+    const bothExist = !!(usernameInput && passwordInput);
+    const bothVisible = bothExist && 
+      usernameInput.offsetWidth > 0 && 
+      passwordInput.offsetWidth > 0;
+    
+    console.log(`[BROWSER] Login detection: username=${!!usernameInput}, password=${!!passwordInput}, visible=${bothVisible}`);
+    
+    return bothVisible;
   });
   
   if (!loginDetected) {
@@ -415,30 +434,42 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     return false;
   }
   
-  console.log(`[SCREENSHOT] Credentials found, attempting login...`);
+  console.log(`[SCREENSHOT] Credentials found (username: ${username.substring(0, 3)}...), attempting login...`);
   
   try {
-    // Fill username using exact selector
-    const usernameInput = page.locator('input[name="username"][aria-label*="Phone number, username, or email"]');
+    // Wait for inputs to be visible and ready
+    console.log(`[SCREENSHOT] Waiting for username input...`);
+    const usernameInput = page.locator('input[name="username"]').first();
+    await usernameInput.waitFor({ state: 'visible', timeout: 5000 });
     await usernameInput.fill(username);
-    console.log(`[SCREENSHOT] Username filled`);
+    console.log(`[SCREENSHOT] ✅ Username filled`);
     
     // Small delay between fields (human-like)
     await page.waitForTimeout(500);
     
-    // Fill password using exact selector
-    const passwordInput = page.locator('input[name="password"][aria-label="Password"]');
+    // Fill password
+    console.log(`[SCREENSHOT] Waiting for password input...`);
+    const passwordInput = page.locator('input[name="password"]').first();
+    await passwordInput.waitFor({ state: 'visible', timeout: 5000 });
     await passwordInput.fill(password);
-    console.log(`[SCREENSHOT] Password filled`);
+    console.log(`[SCREENSHOT] ✅ Password filled`);
     
     // Small delay before clicking login
     await page.waitForTimeout(500);
     
-    // Click login button using exact selector
-    // Button has type="submit" and contains "Log in" text in a child div
-    const loginButton = page.locator('button[type="submit"]').filter({ hasText: 'Log in' });
+    // Click login button - try multiple selectors
+    console.log(`[SCREENSHOT] Looking for login button...`);
+    let loginButton = page.locator('button[type="submit"]').filter({ hasText: 'Log in' });
+    
+    // If that doesn't work, try just button with type submit
+    if (await loginButton.count() === 0) {
+      console.log(`[SCREENSHOT] Trying alternative login button selector...`);
+      loginButton = page.locator('button[type="submit"]').first();
+    }
+    
+    await loginButton.waitFor({ state: 'visible', timeout: 5000 });
     await loginButton.click();
-    console.log(`[SCREENSHOT] Login button clicked`);
+    console.log(`[SCREENSHOT] ✅ Login button clicked`);
     
     // ============================================
     // DEBUG PAUSE: After clicking login button
@@ -466,28 +497,34 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     console.log(`[SCREENSHOT] ✅ Login appears successful!`);
     console.log(`[SCREENSHOT] Current URL after login: ${page.url()}`);
     
-    // Handle "Save Login Info" popup if it appears
+    // Handle "Save Login Info" or other "Not now" popups after login
+    // Instagram uses div[role="button"] with "Not now" text
     try {
-      const notNowButton = page.locator('button:has-text("Not Now"), button:has-text("Not now")').first();
-      if (await notNowButton.isVisible({ timeout: 2000 })) {
+      console.log(`[SCREENSHOT] Looking for "Not now" popup...`);
+      const notNowButton = page.locator('div[role="button"]:has-text("Not now")').first();
+      if (await notNowButton.isVisible({ timeout: 5000 })) {
+        console.log(`[SCREENSHOT] Found "Not now" button, clicking...`);
         await notNowButton.click();
-        console.log(`[SCREENSHOT] Dismissed "Save Login Info" popup`);
-        await page.waitForTimeout(500);
+        console.log(`[SCREENSHOT] ✅ Dismissed "Not now" popup`);
+        await page.waitForTimeout(1000);
+        
+        // Check for another "Not now" popup (e.g., notifications)
+        try {
+          const secondNotNow = page.locator('div[role="button"]:has-text("Not now")').first();
+          if (await secondNotNow.isVisible({ timeout: 2000 })) {
+            console.log(`[SCREENSHOT] Found second "Not now" popup, clicking...`);
+            await secondNotNow.click();
+            console.log(`[SCREENSHOT] ✅ Dismissed second "Not now" popup`);
+            await page.waitForTimeout(500);
+          }
+        } catch (e) {
+          // No second popup, continue
+        }
+      } else {
+        console.log(`[SCREENSHOT] No "Not now" popup found`);
       }
     } catch (e) {
-      // No popup, continue
-    }
-    
-    // Handle "Turn on Notifications" popup if it appears
-    try {
-      const notNowNotif = page.locator('button:has-text("Not Now"), button:has-text("Not now")').first();
-      if (await notNowNotif.isVisible({ timeout: 2000 })) {
-        await notNowNotif.click();
-        console.log(`[SCREENSHOT] Dismissed notifications popup`);
-        await page.waitForTimeout(500);
-      }
-    } catch (e) {
-      // No popup, continue
+      console.log(`[SCREENSHOT] No "Not now" popup found or already dismissed`);
     }
     
     return true;
@@ -1090,8 +1127,7 @@ async function captureScreenshot(
         : (localExecutablePath || undefined);
 
       // Launch browser
-      // DEBUG: Set headless: false locally to see what's happening
-      const useHeadless = isServerless ? chromium.headless : false;
+      const useHeadless = chromium.headless;
       console.log(`[SCREENSHOT] Launching browser - headless: ${useHeadless}, isServerless: ${isServerless}`);
       
       try {
@@ -1187,11 +1223,18 @@ async function captureScreenshot(
           waitUntil: 'domcontentloaded',
           timeout: TIMEOUT_MS
         });
-        await page.waitForTimeout(2000);
+        
+        // Wait for page to fully load
+        console.log(`[SCREENSHOT] Waiting for page to load...`);
+        await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
+          console.log(`[SCREENSHOT] Network idle timeout, proceeding anyway`);
+        });
+        await page.waitForTimeout(3000);
         
         console.log(`[SCREENSHOT] Current URL: ${page.url()}`);
         
         // Check if we're on a login page and handle it
+        console.log(`[SCREENSHOT] Checking for login page...`);
         const loggedIn = await handleInstagramLoginIfNeeded(page);
         
         if (loggedIn) {
