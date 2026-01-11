@@ -113,6 +113,9 @@ async function captureSocialScreenshot(
   url: string,
   viewport: 'desktop' | 'mobile'
 ): Promise<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' } | { websiteScreenshot: string | null }> {
+  const startTime = Date.now();
+  console.log(`[SCREENSHOT CALL] Starting ${platform} screenshot for: ${url}`);
+  
   try {
     // Determine base URL for internal API calls
     // In production (Vercel), use the request host or environment variable
@@ -120,16 +123,29 @@ async function captureSocialScreenshot(
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL 
       || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
     
+    console.log(`[SCREENSHOT CALL] Using base URL: ${baseUrl}`);
+    
+    // Use AbortController for timeout (60 seconds to allow for slow screenshots)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    
     const response = await fetch(`${baseUrl}/api/scan/socials/screenshot`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platform, url, viewport }),
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startTime;
+    console.log(`[SCREENSHOT CALL] ${platform} response received in ${elapsed}ms, status: ${response.status}`);
 
     if (response.ok) {
       const data = await response.json();
       // Check if screenshot capture was successful
       const hasScreenshot = data.success && data.screenshot;
+      console.log(`[SCREENSHOT CALL] ${platform} success: ${hasScreenshot}, screenshot chars: ${data.screenshot?.length || 0}`);
+      
       if (platform === 'website') {
         return { websiteScreenshot: hasScreenshot ? data.screenshot : null };
       } else {
@@ -141,6 +157,8 @@ async function captureSocialScreenshot(
         };
       }
     } else {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error(`[SCREENSHOT CALL] ${platform} HTTP error ${response.status}: ${errorText}`);
       if (platform === 'website') {
         return { websiteScreenshot: null };
       } else {
@@ -148,7 +166,12 @@ async function captureSocialScreenshot(
       }
     }
   } catch (error) {
-    console.error(`Error capturing screenshot for ${platform}:`, error);
+    const elapsed = Date.now() - startTime;
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error(`[SCREENSHOT CALL] ${platform} TIMEOUT after ${elapsed}ms`);
+    } else {
+      console.error(`[SCREENSHOT CALL] ${platform} ERROR after ${elapsed}ms:`, error);
+    }
     if (platform === 'website') {
       return { websiteScreenshot: null };
     } else {
@@ -1075,11 +1098,12 @@ export async function POST(request: NextRequest) {
     // Now capture screenshots in parallel after links are extracted
     const screenshotPromises: Promise<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' } | { websiteScreenshot: string | null }>[] = [];
     
-    // Import the screenshot function (we'll need to create a shared function or call the API)
-    // For now, we'll use the internal screenshot capture logic
+    // Log what screenshots we're going to capture
+    console.log(`[API] Preparing to capture screenshots for ${socialLinks.length} social links + ${websiteUrlToUse ? '1 website' : '0 websites'}`);
     
     // Capture mobile screenshots for social media links
     for (const link of socialLinks) {
+      console.log(`[API] Queuing screenshot for ${link.platform}: ${link.url}`);
       screenshotPromises.push(
         captureSocialScreenshot(link.platform, link.url, 'mobile')
       );
@@ -1087,31 +1111,43 @@ export async function POST(request: NextRequest) {
 
     // Capture website screenshot (desktop) if website URL exists
     if (websiteUrlToUse) {
-      console.log(`[API] Triggering website screenshot for: ${websiteUrlToUse}`);
+      console.log(`[API] Queuing website screenshot for: ${websiteUrlToUse}`);
       screenshotPromises.push(
         captureSocialScreenshot('website', websiteUrlToUse, 'desktop')
       );
     }
 
+    console.log(`[API] Starting ${screenshotPromises.length} screenshot captures in parallel...`);
+    const screenshotStartTime = Date.now();
+    
     // Execute all screenshot captures in parallel
     const screenshotResults = await Promise.allSettled(screenshotPromises);
+    
+    const screenshotElapsed = Date.now() - screenshotStartTime;
+    console.log(`[API] All ${screenshotPromises.length} screenshot captures completed in ${screenshotElapsed}ms`);
 
     // Process screenshot results
     const socialScreenshots: Array<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' }> = [];
     let websiteScreenshot: string | null = null;
 
-    for (const settledResult of screenshotResults) {
+    console.log(`[API] Processing ${screenshotResults.length} screenshot results...`);
+    for (let i = 0; i < screenshotResults.length; i++) {
+      const settledResult = screenshotResults[i];
+      console.log(`[API] Result ${i + 1}: status=${settledResult.status}`);
+      
       if (settledResult.status === 'fulfilled') {
         const result = settledResult.value;
         if ('platform' in result) {
           // Social media screenshot
+          console.log(`[API] Social screenshot for ${result.platform}: hasScreenshot=${!!result.screenshot}, status=${result.status}`);
           socialScreenshots.push(result);
         } else if ('websiteScreenshot' in result) {
           // Website screenshot
+          console.log(`[API] Website screenshot: hasScreenshot=${!!result.websiteScreenshot}`);
           websiteScreenshot = result.websiteScreenshot;
         }
       } else {
-        console.error('Screenshot capture failed:', settledResult.reason);
+        console.error(`[API] Screenshot capture ${i + 1} REJECTED:`, settledResult.reason);
       }
     }
 
