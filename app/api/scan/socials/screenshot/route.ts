@@ -597,6 +597,235 @@ async function setupStealth(page: Page): Promise<void> {
 }
 
 /**
+ * Extracts Instagram username from URL
+ * e.g., "https://www.instagram.com/cafecaprice/" -> "cafecaprice"
+ */
+function extractInstagramUsername(url: string): string | null {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    // Remove leading/trailing slashes and get first path segment
+    const parts = pathname.split('/').filter(p => p.length > 0);
+    if (parts.length > 0) {
+      // Skip special paths
+      const specialPaths = ['p', 'reel', 'reels', 'stories', 'explore', 'accounts', 'direct', 'tv'];
+      if (!specialPaths.includes(parts[0].toLowerCase())) {
+        return parts[0];
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Captures Instagram screenshot by navigating through Google search.
+ * This bypasses Instagram's direct navigation login wall detection.
+ * 
+ * Flow:
+ * 1. Extract username from Instagram URL
+ * 2. Go to Google and search: site:instagram.com "[username]"
+ * 3. Click the first Instagram result
+ * 4. Take screenshot of the profile page
+ */
+async function captureInstagramViaGoogle(
+  url: string,
+  viewport: 'desktop' | 'mobile'
+): Promise<{ success: boolean; screenshot?: string; error?: string }> {
+  let browser: Browser | null = null;
+  let page: Page | null = null;
+
+  try {
+    // Extract username from URL
+    const username = extractInstagramUsername(url);
+    if (!username) {
+      console.error(`[INSTAGRAM] Could not extract username from URL: ${url}`);
+      return { success: false, error: 'Could not extract Instagram username from URL' };
+    }
+    
+    console.log(`[INSTAGRAM] Starting Google-based capture for @${username}`);
+    console.log(`[INSTAGRAM] Original URL: ${url}`);
+    console.log(`[INSTAGRAM] Viewport: ${viewport}`);
+
+    const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const localExecutablePath = process.env.CHROMIUM_EXECUTABLE_PATH;
+    const executablePath = isServerless
+      ? await chromium.executablePath()
+      : (localExecutablePath || undefined);
+
+    // Launch browser
+    const useHeadless = chromium.headless;
+    console.log(`[INSTAGRAM] Launching browser - headless: ${useHeadless}, isServerless: ${isServerless}`);
+
+    browser = await pwChromium.launch({
+      headless: useHeadless,
+      args: [
+        ...(isServerless ? [...chromium.args, ...SERVERLESS_BROWSER_ARGS] : []),
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1920,1080',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
+      ],
+      executablePath,
+      timeout: TIMEOUT_MS
+    });
+
+    console.log(`[INSTAGRAM] Browser launched successfully`);
+
+    // Create context - use DESKTOP settings to avoid mobile app prompts
+    const viewportConfig = VIEWPORTS[viewport];
+    const userAgent = USER_AGENTS.desktop; // Always use desktop UA for Instagram
+    const deviceScaleFactor = viewport === 'mobile' ? 2 : 1;
+
+    const context = await browser.newContext({
+      viewport: viewportConfig,
+      userAgent,
+      deviceScaleFactor,
+      isMobile: false,
+      hasTouch: false,
+      javaScriptEnabled: true,
+      permissions: ['geolocation'],
+      locale: 'en-US',
+    });
+
+    context.setDefaultNavigationTimeout(TIMEOUT_MS);
+    context.setDefaultTimeout(TIMEOUT_MS);
+
+    page = await context.newPage();
+    page.setDefaultNavigationTimeout(TIMEOUT_MS);
+    page.setDefaultTimeout(TIMEOUT_MS);
+
+    // Apply stealth techniques
+    await setupStealth(page);
+    console.log(`[INSTAGRAM] Stealth setup complete`);
+
+    // Set extra headers
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1'
+    });
+
+    // Step 1: Navigate to Google
+    console.log(`[INSTAGRAM] Navigating to Google...`);
+    await page.goto('https://www.google.com', { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
+    await page.waitForTimeout(500 + Math.random() * 500);
+
+    // Step 2: Search for the Instagram profile
+    const searchQuery = `site:instagram.com "${username}"`;
+    console.log(`[INSTAGRAM] Searching Google for: ${searchQuery}`);
+
+    const searchBox = page.locator('textarea[name="q"], input[name="q"]').first();
+    await searchBox.click({ delay: 50 });
+    await searchBox.type(searchQuery, { delay: 30 + Math.random() * 40 });
+    await page.waitForTimeout(200 + Math.random() * 300);
+    await searchBox.press('Enter');
+
+    // Wait for search results
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(1500);
+
+    // Step 3: Find and click the Instagram result
+    console.log(`[INSTAGRAM] Looking for Instagram result in Google search...`);
+    
+    // Look for Instagram links in search results
+    const instagramLinkSelectors = [
+      `a[href*="instagram.com/${username}"]`,
+      `a[href*="instagram.com/${username.toLowerCase()}"]`,
+      'a[href*="instagram.com"]:not([href*="support.instagram.com"])',
+    ];
+
+    let clicked = false;
+    for (const selector of instagramLinkSelectors) {
+      try {
+        const links = await page.locator(selector).all();
+        console.log(`[INSTAGRAM] Found ${links.length} links with selector: ${selector}`);
+        
+        for (const link of links) {
+          const href = await link.getAttribute('href');
+          if (href && href.includes('instagram.com') && !href.includes('support.instagram.com')) {
+            console.log(`[INSTAGRAM] Clicking Instagram link: ${href}`);
+            await link.click({ timeout: 5000 });
+            clicked = true;
+            break;
+          }
+        }
+        if (clicked) break;
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (!clicked) {
+      console.error(`[INSTAGRAM] Could not find Instagram link in Google results`);
+      return { success: false, error: 'Could not find Instagram profile in Google search results' };
+    }
+
+    // Wait for Instagram page to load
+    console.log(`[INSTAGRAM] Waiting for Instagram page to load...`);
+    await page.waitForLoadState('domcontentloaded');
+    
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 10000 });
+    } catch {
+      console.log(`[INSTAGRAM] Network idle timeout, proceeding anyway`);
+    }
+
+    // Additional wait for dynamic content
+    await page.waitForTimeout(2000);
+
+    // Verify we're on Instagram
+    const currentUrl = page.url();
+    console.log(`[INSTAGRAM] Current URL: ${currentUrl}`);
+    
+    if (!currentUrl.includes('instagram.com')) {
+      console.error(`[INSTAGRAM] Not on Instagram page: ${currentUrl}`);
+      return { success: false, error: 'Failed to navigate to Instagram through Google' };
+    }
+
+    // Dismiss any popups
+    console.log(`[INSTAGRAM] Dismissing popups...`);
+    await dismissSocialMediaPopups(page, 'instagram');
+    await removeInstagramPrompts(page);
+
+    // Take screenshot
+    const isMobile = viewport === 'mobile';
+    const useFullPage = !isMobile;
+    
+    console.log(`[INSTAGRAM] Capturing ${useFullPage ? 'full-page' : 'viewport'} screenshot...`);
+    
+    const screenshotBuffer = await page.screenshot({
+      fullPage: useFullPage,
+      timeout: TIMEOUT_MS
+    });
+
+    const base64Screenshot = screenshotBuffer.toString('base64');
+    const dataUrl = `data:image/png;base64,${base64Screenshot}`;
+
+    console.log(`[INSTAGRAM] ✅ Screenshot captured successfully (${base64Screenshot.length} chars)`);
+
+    return {
+      success: true,
+      screenshot: dataUrl,
+    };
+
+  } catch (error) {
+    console.error(`[INSTAGRAM] ❌ Error capturing screenshot:`, error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  } finally {
+    await page?.close().catch(() => {});
+    await browser?.close().catch(() => {});
+    console.log(`[INSTAGRAM] Browser closed`);
+  }
+}
+
+/**
  * Takes a screenshot of a social media profile or website.
  * Routes to simple approach for websites, complex stealth for social media.
  */
@@ -623,7 +852,13 @@ async function captureScreenshot(
     return captureWebsiteScreenshot(url);
   }
 
-  // For social media (Instagram, Facebook), use stealth approach
+  // For Instagram, use Google-based navigation to bypass login wall
+  if (platform === 'instagram') {
+    console.log(`[SCREENSHOT] Using Google-based capture for Instagram: ${url}`);
+    return captureInstagramViaGoogle(url, viewport);
+  }
+
+  // For Facebook, use direct stealth approach
   let browser: Browser | null = null;
   let page: Page | null = null;
 
@@ -667,27 +902,21 @@ async function captureScreenshot(
 
       console.log(`[SCREENSHOT] Browser launched successfully`);
 
-      // INSTAGRAM FIX: Always use desktop viewport for Instagram
-      // Instagram on Vercel detects mobile viewports and shows login page
-      // The old code that worked always used 1920x1080 desktop viewport
-      // This gives the clean desktop web Instagram profile that looked good
-      const useDesktopForInstagram = platform === 'instagram';
-      
       // Create context with appropriate viewport and user agent
-      const viewportConfig = useDesktopForInstagram ? VIEWPORTS.desktop : VIEWPORTS[viewport];
-      const userAgent = USER_AGENTS.desktop; // Always desktop UA
+      const viewportConfig = VIEWPORTS[viewport];
+      const userAgent = USER_AGENTS[viewport];
       
-      // For Instagram: use desktop settings (scale 1)
-      // For Facebook mobile: use scale 2 for crisp screenshots
-      const deviceScaleFactor = (viewport === 'mobile' && platform !== 'instagram') ? 2 : 1;
-
-      if (useDesktopForInstagram) {
-        console.log(`[SCREENSHOT] INSTAGRAM: Forcing desktop viewport (1920x1080) for reliable screenshots`);
-      }
+      // IMPORTANT: Always use isMobile: false, hasTouch: false
+      // This gives us "Chrome DevTools responsive mode" behavior:
+      // - Small viewport (phone-sized)
+      // - Desktop UA (no "open in app" prompts)
+      // - No touch emulation (avoids mobile OS detection)
+      const deviceScaleFactor = viewport === 'mobile' ? 2 : 1;
 
       const context = await browser.newContext({
         viewport: viewportConfig,
         userAgent: userAgent,
+        // Higher scale factor for mobile to get crisp screenshots
         deviceScaleFactor,
         // NEVER use isMobile/hasTouch - triggers "open in app" flows on IG/FB
         isMobile: false,
@@ -701,7 +930,7 @@ async function captureScreenshot(
       });
 
       // Debug log context settings (safe to log, no secrets)
-      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=false, hasTouch=false, platform=${platform}`);
+      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=false, hasTouch=false, UA starts with Chrome/${userAgent.includes('Chrome/') ? 'yes' : 'no'}`);
 
       // Set timeouts
       context.setDefaultNavigationTimeout(TIMEOUT_MS);
@@ -843,11 +1072,10 @@ async function captureScreenshot(
       }
 
       // Take screenshot
-      // Instagram: Always full-page (we forced desktop viewport)
-      // Facebook mobile: viewport only
-      // Facebook desktop: full-page
-      const isMobile = viewport === 'mobile' && platform !== 'instagram';
-      const useFullPage = !isMobile; // Full-page for Instagram (always) and desktop Facebook
+      // For mobile: capture viewport only
+      // For desktop social media: capture full page
+      const isMobile = viewport === 'mobile';
+      const useFullPage = !isMobile; // Full-page for desktop social media, viewport for mobile
       
       console.log(`[SCREENSHOT] Capturing ${useFullPage ? 'full-page' : 'viewport'} screenshot...`);
       const screenshotStartTime = Date.now();
