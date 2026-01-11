@@ -383,6 +383,58 @@ async function removeFacebookLoginPrompt(page: Page): Promise<void> {
 }
 
 /**
+ * Instagram page state types for state machine
+ */
+type InstagramPageState = 'LOGIN' | 'CHALLENGE' | 'PROFILE' | 'UNKNOWN';
+
+/**
+ * Instagram login result with status and optional debug screenshot
+ */
+interface InstagramLoginResult {
+  status: 'success' | 'challenge_required' | 'login_failed' | 'no_credentials' | 'already_logged_in';
+  pageState: InstagramPageState;
+  debugScreenshot?: string; // Base64 screenshot of challenge/error page for debugging
+  error?: string;
+}
+
+/**
+ * Classifies the current Instagram page state based on URL
+ */
+function classifyInstagramPageState(url: string, targetUsername?: string): InstagramPageState {
+  const lowerUrl = url.toLowerCase();
+  
+  // Challenge/verification pages
+  if (lowerUrl.includes('/challenge') || 
+      lowerUrl.includes('/checkpoint') || 
+      lowerUrl.includes('/two_factor') ||
+      lowerUrl.includes('/accounts/suspended') ||
+      lowerUrl.includes('/accounts/onetap')) {
+    return 'CHALLENGE';
+  }
+  
+  // Login page
+  if (lowerUrl.includes('/accounts/login') || 
+      lowerUrl.includes('/accounts/emailsignup')) {
+    return 'LOGIN';
+  }
+  
+  // Profile page - must be on instagram.com and NOT on login/challenge
+  // Profile URLs look like: https://www.instagram.com/username/ or https://instagram.com/username
+  const profilePattern = /instagram\.com\/([a-zA-Z0-9_.]+)\/?(\?.*)?$/;
+  const match = url.match(profilePattern);
+  if (match && match[1]) {
+    const pathUsername = match[1].toLowerCase();
+    // Exclude known non-profile paths
+    const nonProfilePaths = ['accounts', 'explore', 'direct', 'stories', 'reels', 'p', 'tv', 'reel'];
+    if (!nonProfilePaths.includes(pathUsername)) {
+      return 'PROFILE';
+    }
+  }
+  
+  return 'UNKNOWN';
+}
+
+/**
  * Debug function: Logs all buttons and input fields on the page with their attributes
  * This helps diagnose production issues by showing what elements are available
  */
@@ -532,72 +584,48 @@ async function logPageElements(page: Page, context: string): Promise<void> {
 }
 
 /**
- * Checks if we're on an Instagram security challenge page
- * Returns true if challenge page detected, false otherwise
+ * Instagram login state machine - handles login flow and returns detailed status
+ * Returns InstagramLoginResult with status indicating what happened
  */
-async function isInstagramChallengePage(page: Page): Promise<boolean> {
+async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promise<InstagramLoginResult> {
   const currentUrl = page.url();
-  const isChallengePage = currentUrl.includes('/challenge/');
+  let pageState = classifyInstagramPageState(currentUrl);
   
-  if (isChallengePage) {
-    console.log(`[SCREENSHOT] 🔐 Challenge page detected! URL: ${currentUrl}`);
-    await logPageElements(page, 'Challenge page detected');
+  console.log(`[SCREENSHOT] 🔄 STATE MACHINE: Initial URL: ${currentUrl}`);
+  console.log(`[SCREENSHOT] 🔄 STATE MACHINE: Initial state: ${pageState}`);
+  
+  // If already on profile, no login needed
+  if (pageState === 'PROFILE') {
+    console.log(`[SCREENSHOT] ✅ Already on PROFILE page, no login needed`);
+    return { status: 'already_logged_in', pageState };
   }
   
-  return isChallengePage;
-}
-
-/**
- * Detects if we're on an Instagram login page and logs in if credentials are available
- * Returns true if login was performed, false otherwise
- */
-async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
-  console.log(`[SCREENSHOT] Checking for Instagram login page...`);
-  
-  // Wait a bit for page to fully load
-  await page.waitForTimeout(2000);
-  
-  // Check for login form indicators - try multiple selector strategies
-  const loginDetected = await page.evaluate(() => {
-    // Try new Instagram UI selectors first
-    let usernameInput = document.querySelector('input[name="username"][aria-label*="Username, email or mobile number"]') as HTMLInputElement;
-    let passwordInput = document.querySelector('input[name="password"][aria-label="Password"]') as HTMLInputElement;
-    
-    // Fallback: try old selector
-    if (!usernameInput) {
-      usernameInput = document.querySelector('input[name="username"][aria-label*="Phone number, username, or email"]') as HTMLInputElement;
-    }
-    
-    // Fallback: try just by name attribute
-    if (!usernameInput) {
-      usernameInput = document.querySelector('input[name="username"]') as HTMLInputElement;
-    }
-    if (!passwordInput) {
-      passwordInput = document.querySelector('input[name="password"]') as HTMLInputElement;
-    }
-    
-    // Check if both inputs exist and are visible
-    const bothExist = !!(usernameInput && passwordInput);
-    const bothVisible = bothExist && 
-      usernameInput.offsetWidth > 0 && 
-      passwordInput.offsetWidth > 0;
-    
-    console.log(`[BROWSER] Login detection: username=${!!usernameInput}, password=${!!passwordInput}, visible=${bothVisible}`);
-    
-    return bothVisible;
-  });
-  
-  if (!loginDetected) {
-    console.log(`[SCREENSHOT] No login page detected, continuing...`);
-    // Log elements even if login not detected, to see what's on the page
-    await logPageElements(page, 'Login page not detected');
-    return false;
+  // If on challenge page, capture debug screenshot and return
+  if (pageState === 'CHALLENGE') {
+    console.log(`[SCREENSHOT] ⚠️ On CHALLENGE page before login attempt`);
+    const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+    return { 
+      status: 'challenge_required', 
+      pageState,
+      debugScreenshot,
+      error: `Challenge/verification page detected at: ${currentUrl}`
+    };
   }
   
-  console.log(`[SCREENSHOT] 🔐 Login page detected!`);
+  // Not on LOGIN page either - unknown state
+  if (pageState !== 'LOGIN') {
+    console.log(`[SCREENSHOT] ⚠️ Unknown page state, logging elements...`);
+    await logPageElements(page, `Unknown state: ${pageState}`);
+    return { 
+      status: 'login_failed', 
+      pageState,
+      error: `Unexpected page state: ${pageState} at URL: ${currentUrl}`
+    };
+  }
   
-  // Log elements on login page
-  await logPageElements(page, 'Login page detected');
+  // We're on LOGIN page - attempt to log in
+  console.log(`[SCREENSHOT] 🔐 On LOGIN page, attempting authentication...`);
+  await logPageElements(page, 'LOGIN page');
   
   // Get credentials from environment
   const username = process.env.INSTAGRAM_USERNAME;
@@ -605,22 +633,20 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
   
   if (!username || !password) {
     console.log(`[SCREENSHOT] ⚠️ INSTAGRAM_USERNAME or INSTAGRAM_PASSWORD not set in environment`);
-    console.log(`[SCREENSHOT] Cannot log in - proceeding without login`);
-    return false;
+    return { 
+      status: 'no_credentials', 
+      pageState,
+      error: 'Missing INSTAGRAM_USERNAME or INSTAGRAM_PASSWORD environment variables'
+    };
   }
   
-  console.log(`[SCREENSHOT] Credentials found (username: ${username.substring(0, 3)}...), attempting login...`);
+  console.log(`[SCREENSHOT] Credentials found (username: ${username.substring(0, 3)}...), filling form...`);
   
   try {
     // Wait for inputs to be visible and ready
     console.log(`[SCREENSHOT] Waiting for username input...`);
-    // Try new Instagram UI selector first
-    let usernameInput = page.locator('input[name="username"][aria-label*="Username, email or mobile number"]').first();
-    if (await usernameInput.count() === 0) {
-      // Fallback to just name attribute
-      usernameInput = page.locator('input[name="username"]').first();
-    }
-    await usernameInput.waitFor({ state: 'visible', timeout: 5000 });
+    let usernameInput = page.locator('input[name="username"]').first();
+    await usernameInput.waitFor({ state: 'visible', timeout: 10000 });
     await usernameInput.fill(username);
     console.log(`[SCREENSHOT] ✅ Username filled`);
     
@@ -629,109 +655,161 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     
     // Fill password
     console.log(`[SCREENSHOT] Waiting for password input...`);
-    let passwordInput = page.locator('input[name="password"][aria-label="Password"]').first();
-    if (await passwordInput.count() === 0) {
-      // Fallback to just name attribute
-      passwordInput = page.locator('input[name="password"]').first();
-    }
+    let passwordInput = page.locator('input[name="password"]').first();
     await passwordInput.waitFor({ state: 'visible', timeout: 5000 });
     await passwordInput.fill(password);
     console.log(`[SCREENSHOT] ✅ Password filled`);
-    
-    // Log elements after filling credentials
-    await logPageElements(page, 'After filling credentials');
     
     // Small delay before clicking login
     await page.waitForTimeout(500);
     
     // Click login button - try multiple selectors
     console.log(`[SCREENSHOT] Looking for login button...`);
-    // New Instagram UI uses div[role="button"][aria-label="Log in"]
     let loginButton = page.locator('div[role="button"][aria-label="Log in"]').first();
     
-    // Fallback: try button element
     if (await loginButton.count() === 0) {
-      console.log(`[SCREENSHOT] Trying button element selector...`);
       loginButton = page.locator('button[type="submit"]').filter({ hasText: 'Log in' });
     }
-    
-    // Fallback: try just button with type submit
     if (await loginButton.count() === 0) {
-      console.log(`[SCREENSHOT] Trying alternative login button selector...`);
       loginButton = page.locator('button[type="submit"]').first();
     }
     
     await loginButton.waitFor({ state: 'visible', timeout: 5000 });
-    await loginButton.click();
-    console.log(`[SCREENSHOT] ✅ Login button clicked`);
     
-    // Wait for navigation/response
-    await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+    // Extract target username from profile URL for state matching
+    const targetUsernameMatch = targetProfileUrl.match(/instagram\.com\/([a-zA-Z0-9_.]+)/);
+    const targetUsername = targetUsernameMatch ? targetUsernameMatch[1] : '';
+    
+    console.log(`[SCREENSHOT] Clicking login button and waiting for navigation...`);
+    
+    // Click login and use Promise.race to detect navigation outcome
+    await loginButton.click();
+    
+    // Wait for navigation with timeout
+    try {
+      await page.waitForNavigation({ 
+        waitUntil: 'domcontentloaded', 
+        timeout: 20000 
+      });
+    } catch (e) {
+      console.log(`[SCREENSHOT] Navigation timeout, checking current state...`);
+    }
+    
+    // Extra wait for any redirects to settle
     await page.waitForTimeout(3000);
     
-    // Log elements after clicking login
-    await logPageElements(page, 'After clicking login button');
+    // Check the new page state
+    const newUrl = page.url();
+    pageState = classifyInstagramPageState(newUrl, targetUsername);
     
-    // Check if we're on a challenge page - if so, we'll navigate directly to profile instead
-    const isChallenge = await isInstagramChallengePage(page);
+    console.log(`[SCREENSHOT] 🔄 STATE MACHINE: Post-login URL: ${newUrl}`);
+    console.log(`[SCREENSHOT] 🔄 STATE MACHINE: Post-login state: ${pageState}`);
+    await logPageElements(page, `After login attempt - state: ${pageState}`);
     
-    // Check if we're still on login page (login might have failed)
-    const stillOnLogin = await page.evaluate(() => {
-      return !!document.querySelector('input[name="username"]') && 
-             !!document.querySelector('input[name="password"]');
-    });
-    
-    if (stillOnLogin) {
-      console.log(`[SCREENSHOT] ⚠️ Still on login page - login may have failed`);
-      return false;
+    // Handle based on new state
+    if (pageState === 'CHALLENGE') {
+      console.log(`[SCREENSHOT] ⚠️ CHALLENGE page detected after login!`);
+      const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+      return { 
+        status: 'challenge_required', 
+        pageState,
+        debugScreenshot,
+        error: `Challenge/verification required at: ${newUrl}`
+      };
     }
     
-    console.log(`[SCREENSHOT] ✅ Login appears successful!`);
-    console.log(`[SCREENSHOT] Current URL after login: ${page.url()}`);
-    
-    // If we're on a challenge page, return true so we can navigate directly to profile
-    if (isChallenge) {
-      console.log(`[SCREENSHOT] On challenge page - will navigate directly to profile URL`);
+    if (pageState === 'LOGIN') {
+      console.log(`[SCREENSHOT] ⚠️ Still on LOGIN page - credentials may be incorrect`);
+      const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+      return { 
+        status: 'login_failed', 
+        pageState,
+        debugScreenshot,
+        error: `Still on login page after submission - credentials may be invalid`
+      };
     }
     
-    // Handle "Save Login Info" or other "Not now" popups after login
-    // Instagram uses div[role="button"] with "Not now" text
-    try {
-      console.log(`[SCREENSHOT] Looking for "Not now" popup...`);
-      const notNowButton = page.locator('div[role="button"]:has-text("Not now")').first();
-      if (await notNowButton.isVisible({ timeout: 5000 })) {
-        console.log(`[SCREENSHOT] Found "Not now" button, clicking...`);
-        await notNowButton.click();
-        console.log(`[SCREENSHOT] ✅ Dismissed "Not now" popup`);
-        await page.waitForTimeout(1000);
-        
-        // Check for another "Not now" popup (e.g., notifications)
-        try {
-          const secondNotNow = page.locator('div[role="button"]:has-text("Not now")').first();
-          if (await secondNotNow.isVisible({ timeout: 2000 })) {
-            console.log(`[SCREENSHOT] Found second "Not now" popup, clicking...`);
-            await secondNotNow.click();
-            console.log(`[SCREENSHOT] ✅ Dismissed second "Not now" popup`);
-            await page.waitForTimeout(500);
-          }
-        } catch (e) {
-          // No second popup, continue
-        }
-      } else {
-        console.log(`[SCREENSHOT] No "Not now" popup found`);
-      }
+    if (pageState === 'PROFILE') {
+      console.log(`[SCREENSHOT] ✅ Successfully reached PROFILE page!`);
       
-      // Log elements after dismissing popups
-      await logPageElements(page, 'After dismissing popups');
-    } catch (e) {
-      console.log(`[SCREENSHOT] No "Not now" popup found or already dismissed`);
+      // Handle "Save Login Info" or "Not now" popups
+      await dismissInstagramPopups(page);
+      
+      return { status: 'success', pageState };
     }
     
-    return true;
+    // UNKNOWN state - might be intermediate page, try to navigate to profile
+    console.log(`[SCREENSHOT] ⚠️ UNKNOWN state after login, attempting to navigate to profile...`);
+    
+    // Try dismissing popups first
+    await dismissInstagramPopups(page);
+    
+    // Navigate to target profile
+    await page.goto(targetProfileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForTimeout(2000);
+    
+    const finalUrl = page.url();
+    pageState = classifyInstagramPageState(finalUrl, targetUsername);
+    
+    console.log(`[SCREENSHOT] 🔄 STATE MACHINE: Final URL: ${finalUrl}`);
+    console.log(`[SCREENSHOT] 🔄 STATE MACHINE: Final state: ${pageState}`);
+    
+    if (pageState === 'PROFILE') {
+      return { status: 'success', pageState };
+    }
+    
+    if (pageState === 'CHALLENGE') {
+      const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+      return { 
+        status: 'challenge_required', 
+        pageState,
+        debugScreenshot,
+        error: `Challenge detected when navigating to profile: ${finalUrl}`
+      };
+    }
+    
+    // Still not on profile
+    const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+    return { 
+      status: 'login_failed', 
+      pageState,
+      debugScreenshot,
+      error: `Could not reach profile page. Final state: ${pageState}, URL: ${finalUrl}`
+    };
+    
   } catch (error) {
     console.error(`[SCREENSHOT] Login error:`, error);
-    return false;
+    const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+    return { 
+      status: 'login_failed', 
+      pageState,
+      debugScreenshot,
+      error: `Login exception: ${error}`
+    };
   }
+}
+
+/**
+ * Dismisses Instagram popups like "Save Login Info" or "Turn on Notifications"
+ */
+async function dismissInstagramPopups(page: Page): Promise<void> {
+  console.log(`[SCREENSHOT] Looking for Instagram popups to dismiss...`);
+  
+  for (let i = 0; i < 3; i++) {
+    try {
+      const notNowButton = page.locator('div[role="button"]:has-text("Not now"), button:has-text("Not Now"), button:has-text("Not now")').first();
+      if (await notNowButton.isVisible({ timeout: 2000 })) {
+        console.log(`[SCREENSHOT] Found "Not now" popup #${i + 1}, clicking...`);
+        await notNowButton.click();
+        await page.waitForTimeout(1000);
+      } else {
+        break;
+      }
+    } catch (e) {
+      break;
+    }
+  }
+  console.log(`[SCREENSHOT] Popup dismissal complete`);
 }
 
 /**
@@ -1362,24 +1440,28 @@ async function captureScreenshot(
       console.log(`[SCREENSHOT] Browser launched successfully`);
 
       // Create context with appropriate viewport and user agent
-      const viewportConfig = VIEWPORTS[viewport];
-      const userAgent = USER_AGENTS[viewport];
+      // For mobile, use proper iPhone device emulation to get responsive layouts
+      const useMobileEmulation = viewport === 'mobile';
       
-      // IMPORTANT: Always use isMobile: false, hasTouch: false
-      // This gives us "Chrome DevTools responsive mode" behavior:
-      // - Small viewport (phone-sized)
-      // - Desktop UA (no "open in app" prompts)
-      // - No touch emulation (avoids mobile OS detection)
-      const deviceScaleFactor = viewport === 'mobile' ? 2 : 1;
+      // iPhone 14 Pro-like settings for mobile
+      const mobileViewport = { width: 393, height: 852 };
+      const desktopViewport = { width: 1920, height: 1080 };
+      const viewportConfig = useMobileEmulation ? mobileViewport : desktopViewport;
+      
+      // Use mobile UA for mobile viewport to get responsive layouts
+      const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+      const desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      const userAgent = useMobileEmulation ? mobileUA : desktopUA;
+      
+      const deviceScaleFactor = useMobileEmulation ? 3 : 1;
 
       const context = await browser.newContext({
         viewport: viewportConfig,
         userAgent: userAgent,
-        // Higher scale factor for mobile to get crisp screenshots
         deviceScaleFactor,
-        // NEVER use isMobile/hasTouch - triggers "open in app" flows on IG/FB
-        isMobile: false,
-        hasTouch: false,
+        // Use proper mobile emulation for mobile viewport
+        isMobile: useMobileEmulation,
+        hasTouch: useMobileEmulation,
         // Keep JavaScript enabled
         javaScriptEnabled: true,
         // Add permissions
@@ -1389,7 +1471,7 @@ async function captureScreenshot(
       });
 
       // Debug log context settings (safe to log, no secrets)
-      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=false, hasTouch=false, UA starts with Chrome/${userAgent.includes('Chrome/') ? 'yes' : 'no'}`);
+      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=${useMobileEmulation}, hasTouch=${useMobileEmulation}, UA=${useMobileEmulation ? 'iPhone' : 'Chrome Desktop'}`);
 
       // Set timeouts
       context.setDefaultNavigationTimeout(TIMEOUT_MS);
@@ -1413,9 +1495,9 @@ async function captureScreenshot(
       console.log(`[SCREENSHOT] Original URL was: ${url}`);
       const startTime = Date.now();
       
-      // INSTAGRAM: Navigate directly and handle login if needed
+      // INSTAGRAM: Navigate directly and handle login with state machine
       if (platform === 'instagram') {
-        console.log(`[SCREENSHOT] 🔍 Instagram detected - navigating directly to profile`);
+        console.log(`[SCREENSHOT] 🔍 Instagram detected - starting state machine flow`);
         
         // Navigate directly to Instagram URL
         console.log(`[SCREENSHOT] Navigating to: ${normalizedUrl}`);
@@ -1431,51 +1513,85 @@ async function captureScreenshot(
         });
         await page.waitForTimeout(3000);
         
-        console.log(`[SCREENSHOT] Current URL: ${page.url()}`);
+        // Classify initial page state
+        const initialUrl = page.url();
+        let pageState = classifyInstagramPageState(initialUrl);
+        console.log(`[SCREENSHOT] 🔄 Initial URL: ${initialUrl}`);
+        console.log(`[SCREENSHOT] 🔄 Initial state: ${pageState}`);
+        await logPageElements(page, `Initial state: ${pageState}`);
         
-        // Log all page elements after initial navigation
-        await logPageElements(page, 'After Instagram navigation');
-        
-        // Check if we're on a login page and handle it
-        console.log(`[SCREENSHOT] Checking for login page...`);
-        const loggedIn = await handleInstagramLoginIfNeeded(page);
-        
-        if (loggedIn) {
-          // Wait 2 seconds after login, then take screenshot and return
-          console.log(`[SCREENSHOT] Login successful - waiting 2 seconds then taking screenshot`);
-          await page.waitForTimeout(2000);
+        // Handle login if needed
+        if (pageState === 'LOGIN' || pageState === 'CHALLENGE') {
+          const loginResult = await handleInstagramLogin(page, normalizedUrl);
           
-          // Log elements after login
-          await logPageElements(page, 'After login - taking screenshot');
+          console.log(`[SCREENSHOT] 🔄 Login result: ${loginResult.status}`);
           
-          // Take screenshot of page after login
-          const screenshotBuffer = await page.screenshot({
-            fullPage: false,
-            timeout: TIMEOUT_MS
-          });
-          
-          const screenshotBase64 = screenshotBuffer.toString('base64');
-          console.log(`[SCREENSHOT] ✅ Post-login screenshot captured (${screenshotBase64.length} chars)`);
-          console.log(`[SCREENSHOT] Current URL: ${page.url()}`);
-          
-          // Close browser before returning
-          if (browser) {
-            await browser.close();
-            console.log(`[SCREENSHOT] Browser closed`);
+          // Handle non-success states
+          if (loginResult.status === 'challenge_required') {
+            console.log(`[SCREENSHOT] ❌ CHALLENGE detected - cannot proceed`);
+            return {
+              success: false,
+              error: `Instagram challenge/verification required: ${loginResult.error}`,
+              // Include debug screenshot in error for debugging
+              screenshot: loginResult.debugScreenshot
+            };
           }
           
-          return {
-            success: true,
-            screenshot: screenshotBase64
-          };
+          if (loginResult.status === 'login_failed') {
+            console.log(`[SCREENSHOT] ❌ Login FAILED - cannot proceed`);
+            return {
+              success: false,
+              error: `Instagram login failed: ${loginResult.error}`,
+              screenshot: loginResult.debugScreenshot
+            };
+          }
+          
+          if (loginResult.status === 'no_credentials') {
+            console.log(`[SCREENSHOT] ⚠️ No credentials - attempting unauthenticated access`);
+            // Continue without login, might still get some content
+          }
+          
+          // Re-check page state after login
+          pageState = loginResult.pageState;
         }
+        
+        // Verify we're on PROFILE state before proceeding
+        const currentUrl = page.url();
+        pageState = classifyInstagramPageState(currentUrl);
+        console.log(`[SCREENSHOT] 🔄 Pre-screenshot URL: ${currentUrl}`);
+        console.log(`[SCREENSHOT] 🔄 Pre-screenshot state: ${pageState}`);
+        
+        if (pageState !== 'PROFILE') {
+          console.log(`[SCREENSHOT] ⚠️ Not on PROFILE page (state: ${pageState}), attempting direct navigation...`);
+          
+          // Try one more time to navigate to profile
+          await page.goto(normalizedUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
+          await page.waitForTimeout(2000);
+          
+          const finalUrl = page.url();
+          pageState = classifyInstagramPageState(finalUrl);
+          console.log(`[SCREENSHOT] 🔄 Final URL: ${finalUrl}`);
+          console.log(`[SCREENSHOT] 🔄 Final state: ${pageState}`);
+          
+          if (pageState !== 'PROFILE') {
+            const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+            return {
+              success: false,
+              error: `Could not reach Instagram profile. State: ${pageState}, URL: ${finalUrl}`,
+              screenshot: debugScreenshot
+            };
+          }
+        }
+        
+        // NOW we are confirmed on PROFILE page - proceed with overlay removal and grid checks
+        console.log(`[SCREENSHOT] ✅ Confirmed on PROFILE page, proceeding with screenshot preparation...`);
         
         // Remove Instagram popup overlays
         console.log(`[SCREENSHOT] Removing Instagram popup overlays...`);
         await removeInstagramOverlaysViaGoogle(page);
         
         // Log elements before taking screenshot
-        await logPageElements(page, 'Before taking Instagram screenshot');
+        await logPageElements(page, 'Before taking Instagram screenshot (PROFILE state)');
         
       } else {
         // FACEBOOK and WEBSITE: Direct navigation (unchanged)
@@ -1594,16 +1710,33 @@ async function captureScreenshot(
       if (platform === 'facebook') {
         await removeFacebookLoginPrompt(page);
       } else if (platform === 'instagram') {
-        await removeInstagramPrompts(page);
+        // Verify we're on PROFILE state before running grid checks
+        const currentUrl = page.url();
+        const currentState = classifyInstagramPageState(currentUrl);
         
-        // INSTAGRAM: Ensure grid is rendered before screenshot
-        console.log(`[SCREENSHOT] Instagram: Ensuring grid is rendered before capture...`);
-        await logInstagramPageState(page, 'Before Instagram capture');
-        const gridResult = await ensureInstagramGridRendered(page);
-        await logInstagramPageState(page, 'After grid render check');
+        console.log(`[SCREENSHOT] Instagram pre-capture state check: ${currentState}`);
         
-        if (!gridResult.success) {
-          console.log(`[SCREENSHOT] ⚠️ Instagram grid may not be fully loaded (${gridResult.loadedCount} thumbnails)`);
+        if (currentState === 'PROFILE') {
+          await removeInstagramPrompts(page);
+          
+          // INSTAGRAM: Ensure grid is rendered before screenshot
+          console.log(`[SCREENSHOT] Instagram: Ensuring grid is rendered before capture...`);
+          await logInstagramPageState(page, 'Before Instagram capture');
+          const gridResult = await ensureInstagramGridRendered(page);
+          await logInstagramPageState(page, 'After grid render check');
+          
+          if (!gridResult.success) {
+            console.log(`[SCREENSHOT] ⚠️ Instagram grid may not be fully loaded (${gridResult.loadedCount} thumbnails)`);
+          }
+        } else {
+          console.log(`[SCREENSHOT] ⚠️ NOT on PROFILE page (state: ${currentState}) - skipping grid checks`);
+          console.log(`[SCREENSHOT] ⚠️ Current URL: ${currentUrl}`);
+          
+          // Return error since we're not on the profile
+          return {
+            success: false,
+            error: `Instagram page state is ${currentState}, not PROFILE. URL: ${currentUrl}`
+          };
         }
       }
 
