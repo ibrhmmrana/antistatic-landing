@@ -1405,8 +1405,7 @@ async function captureScreenshot(
         : (localExecutablePath || undefined);
 
       // Launch browser
-      // DEBUG: Set headless: false locally to see what's happening
-      const useHeadless = isServerless ? chromium.headless : false;
+      const useHeadless = chromium.headless;
       console.log(`[SCREENSHOT] Launching browser - headless: ${useHeadless}, isServerless: ${isServerless}`);
       
       try {
@@ -1441,26 +1440,29 @@ async function captureScreenshot(
       console.log(`[SCREENSHOT] Browser launched successfully`);
 
       // Create context with appropriate viewport and user agent
-      // For mobile, use proper iPhone device emulation to get responsive layouts
-      const useMobileEmulation = viewport === 'mobile';
+      // IMPORTANT: Only Instagram uses proper mobile emulation (isMobile=true, hasTouch=true)
+      // Facebook keeps old behavior (isMobile=false, hasTouch=false) even for mobile viewport
+      const isMobileViewport = viewport === 'mobile';
+      const useMobileEmulation = isMobileViewport && platform === 'instagram';
       
-      // iPhone 14 Pro-like settings for mobile
+      // Viewport configurations
       const mobileViewport = { width: 393, height: 852 };
       const desktopViewport = { width: 1920, height: 1080 };
-      const viewportConfig = useMobileEmulation ? mobileViewport : desktopViewport;
+      const viewportConfig = isMobileViewport ? mobileViewport : desktopViewport;
       
-      // Use mobile UA for mobile viewport to get responsive layouts
+      // User agents - Instagram mobile uses iPhone UA, Facebook/others use desktop UA even for mobile viewport
       const mobileUA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
       const desktopUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
       const userAgent = useMobileEmulation ? mobileUA : desktopUA;
       
-      const deviceScaleFactor = useMobileEmulation ? 3 : 1;
+      const deviceScaleFactor = isMobileViewport ? 2 : 1;
 
       const context = await browser.newContext({
         viewport: viewportConfig,
         userAgent: userAgent,
         deviceScaleFactor,
-        // Use proper mobile emulation for mobile viewport
+        // Only Instagram uses proper mobile emulation
+        // Facebook keeps old behavior: isMobile=false, hasTouch=false (even for mobile viewport)
         isMobile: useMobileEmulation,
         hasTouch: useMobileEmulation,
         // Keep JavaScript enabled
@@ -1472,7 +1474,7 @@ async function captureScreenshot(
       });
 
       // Debug log context settings (safe to log, no secrets)
-      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=${useMobileEmulation}, hasTouch=${useMobileEmulation}, UA=${useMobileEmulation ? 'iPhone' : 'Chrome Desktop'}`);
+      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=${useMobileEmulation}, hasTouch=${useMobileEmulation}, UA=${useMobileEmulation ? 'iPhone' : 'Chrome Desktop'}, platform=${platform}`);
 
       // Set timeouts
       context.setDefaultNavigationTimeout(TIMEOUT_MS);
