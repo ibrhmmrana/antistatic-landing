@@ -1405,7 +1405,8 @@ async function captureScreenshot(
         : (localExecutablePath || undefined);
 
       // Launch browser
-      const useHeadless = chromium.headless;
+      // DEBUG: Set headless: false locally to see what's happening
+      const useHeadless = isServerless ? chromium.headless : false;
       console.log(`[SCREENSHOT] Launching browser - headless: ${useHeadless}, isServerless: ${isServerless}`);
       
       try {
