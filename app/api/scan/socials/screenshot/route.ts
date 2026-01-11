@@ -383,6 +383,155 @@ async function removeFacebookLoginPrompt(page: Page): Promise<void> {
 }
 
 /**
+ * Debug function: Logs all buttons and input fields on the page with their attributes
+ * This helps diagnose production issues by showing what elements are available
+ */
+async function logPageElements(page: Page, context: string): Promise<void> {
+  console.log(`[SCREENSHOT] ========== PAGE ELEMENTS DEBUG: ${context} ==========`);
+  console.log(`[SCREENSHOT] Current URL: ${page.url()}`);
+  
+  const elements = await page.evaluate(() => {
+    const result: {
+      inputs: Array<{
+        type: string;
+        name: string;
+        ariaLabel: string;
+        placeholder: string;
+        value: string;
+        visible: boolean;
+        selector: string;
+      }>;
+      buttons: Array<{
+        type: string;
+        text: string;
+        ariaLabel: string;
+        role: string;
+        visible: boolean;
+        selector: string;
+      }>;
+      clickableDivs: Array<{
+        text: string;
+        ariaLabel: string;
+        role: string;
+        visible: boolean;
+        selector: string;
+      }>;
+    } = {
+      inputs: [],
+      buttons: [],
+      clickableDivs: []
+    };
+
+    // Log all input fields
+    document.querySelectorAll('input').forEach((input, index) => {
+      const style = window.getComputedStyle(input);
+      const rect = input.getBoundingClientRect();
+      const isVisible = style.display !== 'none' && 
+                       style.visibility !== 'hidden' && 
+                       style.opacity !== '0' &&
+                       rect.width > 0 && 
+                       rect.height > 0;
+
+      result.inputs.push({
+        type: input.type || 'text',
+        name: input.name || '',
+        ariaLabel: input.getAttribute('aria-label') || '',
+        placeholder: input.placeholder || '',
+        value: input.value || '',
+        visible: isVisible,
+        selector: `input[${input.name ? `name="${input.name}"` : ''}${input.type ? `type="${input.type}"` : ''}]`
+      });
+    });
+
+    // Log all button elements
+    document.querySelectorAll('button').forEach((button, index) => {
+      const style = window.getComputedStyle(button);
+      const rect = button.getBoundingClientRect();
+      const isVisible = style.display !== 'none' && 
+                       style.visibility !== 'hidden' && 
+                       style.opacity !== '0' &&
+                       rect.width > 0 && 
+                       rect.height > 0;
+
+      result.buttons.push({
+        type: button.type || 'button',
+        text: button.textContent?.trim() || '',
+        ariaLabel: button.getAttribute('aria-label') || '',
+        role: button.getAttribute('role') || 'button',
+        visible: isVisible,
+        selector: `button[type="${button.type || 'button'}"][${button.getAttribute('aria-label') ? `aria-label="${button.getAttribute('aria-label')}"` : ''}]`
+      });
+    });
+
+    // Log all divs with role="button" (Instagram uses these)
+    document.querySelectorAll('div[role="button"]').forEach((div, index) => {
+      const style = window.getComputedStyle(div);
+      const rect = div.getBoundingClientRect();
+      const isVisible = style.display !== 'none' && 
+                       style.visibility !== 'hidden' && 
+                       style.opacity !== '0' &&
+                       rect.width > 0 && 
+                       rect.height > 0;
+
+      const text = div.textContent?.trim() || '';
+      // Only log if it has meaningful text or aria-label
+      if (text.length > 0 || div.getAttribute('aria-label')) {
+        result.clickableDivs.push({
+          text: text.substring(0, 100), // Limit text length
+          ariaLabel: div.getAttribute('aria-label') || '',
+          role: div.getAttribute('role') || '',
+          visible: isVisible,
+          selector: `div[role="button"]${div.getAttribute('aria-label') ? `[aria-label="${div.getAttribute('aria-label')}"]` : ''}`
+        });
+      }
+    });
+
+    return result;
+  });
+
+  // Log inputs
+  console.log(`[SCREENSHOT] --- INPUT FIELDS (${elements.inputs.length} total) ---`);
+  elements.inputs.forEach((input, i) => {
+    console.log(`[SCREENSHOT] Input ${i + 1}:`, {
+      type: input.type,
+      name: input.name,
+      ariaLabel: input.ariaLabel,
+      placeholder: input.placeholder,
+      value: input.value ? `${input.value.substring(0, 10)}...` : '(empty)',
+      visible: input.visible,
+      selector: input.selector
+    });
+  });
+
+  // Log buttons
+  console.log(`[SCREENSHOT] --- BUTTON ELEMENTS (${elements.buttons.length} total) ---`);
+  elements.buttons.forEach((button, i) => {
+    console.log(`[SCREENSHOT] Button ${i + 1}:`, {
+      type: button.type,
+      text: button.text.substring(0, 50),
+      ariaLabel: button.ariaLabel,
+      role: button.role,
+      visible: button.visible,
+      selector: button.selector
+    });
+  });
+
+  // Log clickable divs
+  console.log(`[SCREENSHOT] --- CLICKABLE DIVS (${elements.clickableDivs.length} total) ---`);
+  elements.clickableDivs.forEach((div, i) => {
+    console.log(`[SCREENSHOT] Div ${i + 1}:`, {
+      text: div.text.substring(0, 50),
+      ariaLabel: div.ariaLabel,
+      role: div.role,
+      visible: div.visible,
+      selector: div.selector
+    });
+  });
+
+  console.log(`[SCREENSHOT] ========== END PAGE ELEMENTS DEBUG ==========`);
+}
+
+/**
  * Detects if we're on an Instagram login page and logs in if credentials are available
  * Returns true if login was performed, false otherwise
  */
@@ -424,10 +573,15 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
   
   if (!loginDetected) {
     console.log(`[SCREENSHOT] No login page detected, continuing...`);
+    // Log elements even if login not detected, to see what's on the page
+    await logPageElements(page, 'Login page not detected');
     return false;
   }
   
   console.log(`[SCREENSHOT] 🔐 Login page detected!`);
+  
+  // Log elements on login page
+  await logPageElements(page, 'Login page detected');
   
   // Get credentials from environment
   const username = process.env.INSTAGRAM_USERNAME;
@@ -468,6 +622,9 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     await passwordInput.fill(password);
     console.log(`[SCREENSHOT] ✅ Password filled`);
     
+    // Log elements after filling credentials
+    await logPageElements(page, 'After filling credentials');
+    
     // Small delay before clicking login
     await page.waitForTimeout(500);
     
@@ -495,6 +652,9 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     // Wait for navigation/response
     await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
     await page.waitForTimeout(3000);
+    
+    // Log elements after clicking login
+    await logPageElements(page, 'After clicking login button');
     
     // Check if we're still on login page (login might have failed)
     const stillOnLogin = await page.evaluate(() => {
@@ -536,6 +696,9 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
       } else {
         console.log(`[SCREENSHOT] No "Not now" popup found`);
       }
+      
+      // Log elements after dismissing popups
+      await logPageElements(page, 'After dismissing popups');
     } catch (e) {
       console.log(`[SCREENSHOT] No "Not now" popup found or already dismissed`);
     }
@@ -1246,6 +1409,9 @@ async function captureScreenshot(
         
         console.log(`[SCREENSHOT] Current URL: ${page.url()}`);
         
+        // Log all page elements after initial navigation
+        await logPageElements(page, 'After Instagram navigation');
+        
         // Check if we're on a login page and handle it
         console.log(`[SCREENSHOT] Checking for login page...`);
         const loggedIn = await handleInstagramLoginIfNeeded(page);
@@ -1258,11 +1424,17 @@ async function captureScreenshot(
             timeout: TIMEOUT_MS
           });
           await page.waitForTimeout(2000);
+          
+          // Log elements after navigating to profile
+          await logPageElements(page, 'After navigating to profile post-login');
         }
         
         // Remove Instagram popup overlays
         console.log(`[SCREENSHOT] Removing Instagram popup overlays...`);
         await removeInstagramOverlaysViaGoogle(page);
+        
+        // Log elements before taking screenshot
+        await logPageElements(page, 'Before taking Instagram screenshot');
         
       } else {
         // FACEBOOK and WEBSITE: Direct navigation (unchanged)
