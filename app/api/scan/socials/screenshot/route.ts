@@ -667,21 +667,27 @@ async function captureScreenshot(
 
       console.log(`[SCREENSHOT] Browser launched successfully`);
 
-      // Create context with appropriate viewport and user agent
-      const viewportConfig = VIEWPORTS[viewport];
-      const userAgent = USER_AGENTS[viewport];
+      // INSTAGRAM FIX: Always use desktop viewport for Instagram
+      // Instagram on Vercel detects mobile viewports and shows login page
+      // The old code that worked always used 1920x1080 desktop viewport
+      // This gives the clean desktop web Instagram profile that looked good
+      const useDesktopForInstagram = platform === 'instagram';
       
-      // IMPORTANT: Always use isMobile: false, hasTouch: false
-      // This gives us "Chrome DevTools responsive mode" behavior:
-      // - Small viewport (phone-sized)
-      // - Desktop UA (no "open in app" prompts)
-      // - No touch emulation (avoids mobile OS detection)
-      const deviceScaleFactor = viewport === 'mobile' ? 2 : 1;
+      // Create context with appropriate viewport and user agent
+      const viewportConfig = useDesktopForInstagram ? VIEWPORTS.desktop : VIEWPORTS[viewport];
+      const userAgent = USER_AGENTS.desktop; // Always desktop UA
+      
+      // For Instagram: use desktop settings (scale 1)
+      // For Facebook mobile: use scale 2 for crisp screenshots
+      const deviceScaleFactor = (viewport === 'mobile' && platform !== 'instagram') ? 2 : 1;
+
+      if (useDesktopForInstagram) {
+        console.log(`[SCREENSHOT] INSTAGRAM: Forcing desktop viewport (1920x1080) for reliable screenshots`);
+      }
 
       const context = await browser.newContext({
         viewport: viewportConfig,
         userAgent: userAgent,
-        // Higher scale factor for mobile to get crisp screenshots
         deviceScaleFactor,
         // NEVER use isMobile/hasTouch - triggers "open in app" flows on IG/FB
         isMobile: false,
@@ -695,7 +701,7 @@ async function captureScreenshot(
       });
 
       // Debug log context settings (safe to log, no secrets)
-      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=false, hasTouch=false, UA starts with Chrome/${userAgent.includes('Chrome/') ? 'yes' : 'no'}`);
+      console.log(`[SCREENSHOT] Context created: ${viewportConfig.width}x${viewportConfig.height}, scale=${deviceScaleFactor}, isMobile=false, hasTouch=false, platform=${platform}`);
 
       // Set timeouts
       context.setDefaultNavigationTimeout(TIMEOUT_MS);
@@ -837,10 +843,11 @@ async function captureScreenshot(
       }
 
       // Take screenshot
-      // For mobile: capture viewport only
-      // For desktop social media: capture full page
-      const isMobile = viewport === 'mobile';
-      const useFullPage = !isMobile; // Full-page for desktop social media, viewport for mobile
+      // Instagram: Always full-page (we forced desktop viewport)
+      // Facebook mobile: viewport only
+      // Facebook desktop: full-page
+      const isMobile = viewport === 'mobile' && platform !== 'instagram';
+      const useFullPage = !isMobile; // Full-page for Instagram (always) and desktop Facebook
       
       console.log(`[SCREENSHOT] Capturing ${useFullPage ? 'full-page' : 'viewport'} screenshot...`);
       const screenshotStartTime = Date.now();
