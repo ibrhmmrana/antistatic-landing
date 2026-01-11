@@ -108,6 +108,59 @@ const scraperCache = new Map<string, { status: 'running' | 'completed', result?:
  * This is used internally to capture screenshots after link extraction
  * Note: In server-side context, we need to use the full URL or localhost
  */
+/**
+ * Builds a protected Vercel request with bypass headers for Deployment Protection.
+ * 
+ * When Vercel Deployment Protection is enabled, internal API calls return 401.
+ * This helper adds the necessary bypass header and query parameter.
+ * 
+ * @param baseUrl - The base URL for the API call
+ * @param path - The API path (e.g., '/api/scan/socials/screenshot')
+ * @returns Object with the full URL and headers including bypass if configured
+ */
+function buildProtectedVercelRequest(baseUrl: string, path: string): { url: string; headers: Record<string, string> } {
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  
+  // Add bypass cookie query param (safe to always include)
+  let url = `${baseUrl}${path}`;
+  url += url.includes('?') ? '&' : '?';
+  url += 'x-vercel-set-bypass-cookie=true';
+  
+  if (bypassSecret) {
+    // Add bypass header when secret is configured
+    headers['x-vercel-protection-bypass'] = bypassSecret;
+    
+    // Debug log in dev (never log the secret itself)
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[SCREENSHOT CALL] Bypass header configured: true`);
+    }
+  } else {
+    // Warn if secret is missing - request may fail with 401
+    console.warn(`[SCREENSHOT CALL] Missing VERCEL_AUTOMATION_BYPASS_SECRET — request may 401`);
+  }
+  
+  return { url, headers };
+}
+
+/**
+ * Logs error response with truncated body and helpful hints.
+ */
+function logScreenshotError(platform: string, status: number, body: string): void {
+  // Truncate body to first 300 chars to avoid logging huge HTML
+  const snippet = body.length > 300 ? body.substring(0, 300) + '...' : body;
+  
+  console.error(`[SCREENSHOT CALL] ${platform} HTTP error ${status}`);
+  console.error(`[SCREENSHOT CALL] Response snippet: ${snippet}`);
+  
+  // Add hint for auth errors
+  if (status === 401 || status === 403) {
+    console.error(`[SCREENSHOT CALL] HINT: Deployment Protection likely enabled — ensure VERCEL_AUTOMATION_BYPASS_SECRET is configured and header is sent.`);
+  }
+}
+
 async function captureSocialScreenshot(
   platform: string,
   url: string,
@@ -125,13 +178,16 @@ async function captureSocialScreenshot(
     
     console.log(`[SCREENSHOT CALL] Using base URL: ${baseUrl}`);
     
+    // Build protected request with Vercel bypass headers
+    const { url: requestUrl, headers } = buildProtectedVercelRequest(baseUrl, '/api/scan/socials/screenshot');
+    
     // Use AbortController for timeout (60 seconds to allow for slow screenshots)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     
-    const response = await fetch(`${baseUrl}/api/scan/socials/screenshot`, {
+    const response = await fetch(requestUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ platform, url, viewport }),
       signal: controller.signal,
     });
@@ -158,7 +214,7 @@ async function captureSocialScreenshot(
       }
     } else {
       const errorText = await response.text().catch(() => 'Unknown error');
-      console.error(`[SCREENSHOT CALL] ${platform} HTTP error ${response.status}: ${errorText}`);
+      logScreenshotError(platform, response.status, errorText);
       if (platform === 'website') {
         return { websiteScreenshot: null };
       } else {
