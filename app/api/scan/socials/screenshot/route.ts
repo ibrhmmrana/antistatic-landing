@@ -1443,7 +1443,7 @@ async function captureScreenshot(
       // IMPORTANT: Only Instagram uses proper mobile emulation (isMobile=true, hasTouch=true)
       // Facebook keeps old behavior (isMobile=false, hasTouch=false) even for mobile viewport
       const isMobileViewport = viewport === 'mobile';
-      const useMobileEmulation = isMobileViewport && platform === 'instagram';
+      const useMobileEmulation = isMobileViewport && platform === 'instagram';  // Only Instagram uses mobile emulation
       
       // Viewport configurations
       const mobileViewport = { width: 393, height: 852 };
