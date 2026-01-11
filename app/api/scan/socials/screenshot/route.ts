@@ -1445,13 +1445,32 @@ async function captureScreenshot(
           const isChallenge = await isInstagramChallengePage(page);
           
           if (isChallenge) {
-            // If on challenge page, navigate directly to profile URL (skip challenge)
-            console.log(`[SCREENSHOT] On challenge page - navigating directly to profile: ${normalizedUrl}`);
-            await page.goto(normalizedUrl, {
-              waitUntil: 'domcontentloaded',
+            // If on challenge page, take screenshot of challenge page and return
+            console.log(`[SCREENSHOT] On challenge page - taking screenshot of challenge page`);
+            await page.waitForTimeout(2000); // Wait for page to settle
+            
+            // Log elements on challenge page
+            await logPageElements(page, 'Challenge page - taking screenshot');
+            
+            // Take screenshot of challenge page
+            const screenshotBuffer = await page.screenshot({
+              fullPage: false,
               timeout: TIMEOUT_MS
             });
-            await page.waitForTimeout(3000);
+            
+            const screenshotBase64 = screenshotBuffer.toString('base64');
+            console.log(`[SCREENSHOT] ✅ Challenge page screenshot captured (${screenshotBase64.length} chars)`);
+            
+            // Close browser before returning
+            if (browser) {
+              await browser.close();
+              console.log(`[SCREENSHOT] Browser closed`);
+            }
+            
+            return {
+              success: true,
+              screenshot: screenshotBase64
+            };
           } else {
             // After login, navigate to the profile URL again
             console.log(`[SCREENSHOT] Navigating to profile after login: ${normalizedUrl}`);
@@ -1460,6 +1479,34 @@ async function captureScreenshot(
               timeout: TIMEOUT_MS
             });
             await page.waitForTimeout(2000);
+            
+            // Check if we got redirected to challenge page after navigation
+            const isChallengeAfterNav = await isInstagramChallengePage(page);
+            if (isChallengeAfterNav) {
+              // Take screenshot of challenge page and return
+              console.log(`[SCREENSHOT] Redirected to challenge page after navigation - taking screenshot`);
+              await page.waitForTimeout(2000);
+              
+              await logPageElements(page, 'Challenge page after navigation - taking screenshot');
+              
+              const screenshotBuffer = await page.screenshot({
+                fullPage: false,
+                timeout: TIMEOUT_MS
+              });
+              
+              const screenshotBase64 = screenshotBuffer.toString('base64');
+              console.log(`[SCREENSHOT] ✅ Challenge page screenshot captured (${screenshotBase64.length} chars)`);
+              
+              if (browser) {
+                await browser.close();
+                console.log(`[SCREENSHOT] Browser closed`);
+              }
+              
+              return {
+                success: true,
+                screenshot: screenshotBase64
+              };
+            }
           }
           
           // Check final URL after navigation
@@ -1468,14 +1515,39 @@ async function captureScreenshot(
           
           if (currentUrl.includes('/accounts/login/')) {
             console.log(`[SCREENSHOT] ⚠️ Still redirected to login page`);
-          } else if (currentUrl.includes('/challenge/')) {
-            console.log(`[SCREENSHOT] ⚠️ Still on challenge page - may need manual intervention`);
           } else {
             console.log(`[SCREENSHOT] ✅ Successfully navigated to profile or content page`);
           }
           
           // Log elements after navigating to profile
           await logPageElements(page, 'After navigating to profile post-login');
+        }
+        
+        // Check if we're on challenge page before proceeding with Instagram processing
+        const isChallengeBeforeProcessing = await isInstagramChallengePage(page);
+        if (isChallengeBeforeProcessing) {
+          console.log(`[SCREENSHOT] On challenge page before Instagram processing - taking screenshot`);
+          await page.waitForTimeout(2000);
+          
+          await logPageElements(page, 'Challenge page before processing - taking screenshot');
+          
+          const screenshotBuffer = await page.screenshot({
+            fullPage: false,
+            timeout: TIMEOUT_MS
+          });
+          
+          const screenshotBase64 = screenshotBuffer.toString('base64');
+          console.log(`[SCREENSHOT] ✅ Challenge page screenshot captured (${screenshotBase64.length} chars)`);
+          
+          if (browser) {
+            await browser.close();
+            console.log(`[SCREENSHOT] Browser closed`);
+          }
+          
+          return {
+            success: true,
+            screenshot: screenshotBase64
+          };
         }
         
         // Remove Instagram popup overlays
