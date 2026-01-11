@@ -532,6 +532,63 @@ async function logPageElements(page: Page, context: string): Promise<void> {
 }
 
 /**
+ * Handles Instagram security challenge if present
+ * Returns true if challenge was handled, false otherwise
+ */
+async function handleInstagramChallenge(page: Page): Promise<boolean> {
+  console.log(`[SCREENSHOT] Checking for Instagram challenge page...`);
+  
+  const currentUrl = page.url();
+  const isChallengePage = currentUrl.includes('/challenge/');
+  
+  if (!isChallengePage) {
+    console.log(`[SCREENSHOT] No challenge page detected`);
+    return false;
+  }
+  
+  console.log(`[SCREENSHOT] 🔐 Challenge page detected! URL: ${currentUrl}`);
+  
+  // Log elements on challenge page
+  await logPageElements(page, 'Challenge page detected');
+  
+  try {
+    // Look for "Next" button - it's a div[role="button"] with text "Next"
+    console.log(`[SCREENSHOT] Looking for "Next" button on challenge page...`);
+    const nextButton = page.locator('div[role="button"]:has-text("Next")').first();
+    
+    if (await nextButton.isVisible({ timeout: 5000 })) {
+      console.log(`[SCREENSHOT] Found "Next" button, clicking...`);
+      await nextButton.click();
+      console.log(`[SCREENSHOT] ✅ Clicked "Next" button on challenge page`);
+      
+      // Wait for navigation/response
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+      await page.waitForTimeout(3000);
+      
+      // Check if we're still on challenge page or moved forward
+      const newUrl = page.url();
+      console.log(`[SCREENSHOT] URL after clicking Next: ${newUrl}`);
+      
+      if (newUrl.includes('/challenge/')) {
+        console.log(`[SCREENSHOT] Still on challenge page, may need additional steps`);
+        // Log elements again to see what's available
+        await logPageElements(page, 'Still on challenge page after Next');
+      } else {
+        console.log(`[SCREENSHOT] ✅ Challenge appears to be completed`);
+      }
+      
+      return true;
+    } else {
+      console.log(`[SCREENSHOT] "Next" button not found on challenge page`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`[SCREENSHOT] Error handling challenge:`, error);
+    return false;
+  }
+}
+
+/**
  * Detects if we're on an Instagram login page and logs in if credentials are available
  * Returns true if login was performed, false otherwise
  */
@@ -656,6 +713,9 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     // Log elements after clicking login
     await logPageElements(page, 'After clicking login button');
     
+    // Check if we're on a challenge page and handle it
+    const challengeHandled = await handleInstagramChallenge(page);
+    
     // Check if we're still on login page (login might have failed)
     const stillOnLogin = await page.evaluate(() => {
       return !!document.querySelector('input[name="username"]') && 
@@ -669,6 +729,13 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     
     console.log(`[SCREENSHOT] ✅ Login appears successful!`);
     console.log(`[SCREENSHOT] Current URL after login: ${page.url()}`);
+    
+    // If challenge was handled, wait a bit more for any redirects
+    if (challengeHandled) {
+      await page.waitForTimeout(2000);
+      // Check if we need to handle another challenge step
+      await handleInstagramChallenge(page);
+    }
     
     // Handle "Save Login Info" or other "Not now" popups after login
     // Instagram uses div[role="button"] with "Not now" text
@@ -1424,6 +1491,21 @@ async function captureScreenshot(
             timeout: TIMEOUT_MS
           });
           await page.waitForTimeout(2000);
+          
+          // Check if we got redirected to challenge or login page
+          const currentUrl = page.url();
+          if (currentUrl.includes('/challenge/')) {
+            console.log(`[SCREENSHOT] Redirected to challenge page, handling...`);
+            await handleInstagramChallenge(page);
+            // Try navigating to profile again after challenge
+            await page.goto(normalizedUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: TIMEOUT_MS
+            });
+            await page.waitForTimeout(2000);
+          } else if (currentUrl.includes('/accounts/login/')) {
+            console.log(`[SCREENSHOT] ⚠️ Still redirected to login page - challenge may not be complete`);
+          }
           
           // Log elements after navigating to profile
           await logPageElements(page, 'After navigating to profile post-login');
