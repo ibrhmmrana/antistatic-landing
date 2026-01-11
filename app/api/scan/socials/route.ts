@@ -112,7 +112,7 @@ const scraperCache = new Map<string, { status: 'running' | 'completed', result?:
  * Builds a protected Vercel request with bypass headers for Deployment Protection.
  * 
  * When Vercel Deployment Protection is enabled, internal API calls return 401.
- * This helper adds the necessary bypass header and query parameter.
+ * This helper adds the necessary bypass header AND query parameters (belt + braces).
  * 
  * @param baseUrl - The base URL for the API call
  * @param path - The API path (e.g., '/api/scan/socials/screenshot')
@@ -124,22 +124,24 @@ function buildProtectedVercelRequest(baseUrl: string, path: string): { url: stri
     'Content-Type': 'application/json',
   };
   
-  // Add bypass cookie query param (safe to always include)
+  // Build URL with query params
   let url = `${baseUrl}${path}`;
-  url += url.includes('?') ? '&' : '?';
-  url += 'x-vercel-set-bypass-cookie=true';
+  const separator = url.includes('?') ? '&' : '?';
   
   if (bypassSecret) {
-    // Add bypass header when secret is configured
+    // Add BOTH query params AND header (belt + braces approach)
+    // Query param: x-vercel-protection-bypass=<token>
+    // Query param: x-vercel-set-bypass-cookie=true
+    // Header: x-vercel-protection-bypass: <token>
+    url += `${separator}x-vercel-protection-bypass=${encodeURIComponent(bypassSecret)}&x-vercel-set-bypass-cookie=true`;
     headers['x-vercel-protection-bypass'] = bypassSecret;
     
-    // Debug log in dev (never log the secret itself)
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[SCREENSHOT CALL] Bypass header configured: true`);
-    }
+    // Log bypass status (NEVER log the secret itself)
+    console.log(`[SCREENSHOT CALL] Vercel bypass configured: true (header + query param)`);
   } else {
-    // Warn if secret is missing - request may fail with 401
-    console.warn(`[SCREENSHOT CALL] Missing VERCEL_AUTOMATION_BYPASS_SECRET — request may 401`);
+    // Just add the cookie param, but warn about missing secret
+    url += `${separator}x-vercel-set-bypass-cookie=true`;
+    console.warn(`[SCREENSHOT CALL] ⚠️ Missing VERCEL_AUTOMATION_BYPASS_SECRET — request may 401`);
   }
   
   return { url, headers };
@@ -1157,12 +1159,11 @@ export async function POST(request: NextRequest) {
     // Log what screenshots we're going to capture
     console.log(`[API] Preparing to capture screenshots for ${socialLinks.length} social links + ${websiteUrlToUse ? '1 website' : '0 websites'}`);
     
-    // IMPORTANT: Use DESKTOP viewport for social media (Instagram/Facebook)
-    // Mobile viewports trigger login walls on these platforms
+    // Capture mobile screenshots for social media links
     for (const link of socialLinks) {
-      console.log(`[API] Queuing DESKTOP screenshot for ${link.platform}: ${link.url}`);
+      console.log(`[API] Queuing screenshot for ${link.platform}: ${link.url}`);
       screenshotPromises.push(
-        captureSocialScreenshot(link.platform, link.url, 'desktop')
+        captureSocialScreenshot(link.platform, link.url, 'mobile')
       );
     }
 
