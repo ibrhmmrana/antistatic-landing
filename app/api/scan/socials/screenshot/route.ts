@@ -6,16 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import type { Browser, Page } from "playwright";
+import { chromium as pwChromium } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
+import chromium from "@sparticuz/chromium";
 
 // Force Node.js runtime (Playwright is not compatible with Edge runtime)
 export const runtime = "nodejs";
-
-// Ensure Playwright looks for browsers in a deploy-friendly location.
-// We also lazy-import Playwright later so this env var is applied before module init.
-if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
-  process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
-}
 
 // Viewport configurations
 const VIEWPORTS = {
@@ -443,50 +439,40 @@ async function captureScreenshot(
     console.log(`[SCREENSHOT] Starting capture for ${viewport} viewport`);
     console.log(`[SCREENSHOT] URL: ${url}`);
 
-    // Lazy import Playwright AFTER setting PLAYWRIGHT_BROWSERS_PATH so deploys can locate Chromium.
-    const { chromium } = await import("playwright");
+    const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const localExecutablePath = process.env.CHROMIUM_EXECUTABLE_PATH;
+    const executablePath = isServerless
+      ? await chromium.executablePath()
+      : (localExecutablePath || undefined);
 
     // Launch browser with UNDETECTABLE headless mode
     // Note: Playwright's headless: true uses the new headless mode by default (more stealthy than old headless)
-    browser = await chromium.launch({
-      headless: true,
+    try {
+      browser = await pwChromium.launch({
+        headless: chromium.headless,
       args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
+        // Start with @sparticuz/chromium defaults (serverless-safe). Keep our extras minimal to avoid conflicts.
+        ...chromium.args,
         '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage',
-        
-        // CRITICAL: These make headless look like headful
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu', // GPU can cause issues in headless
-        
         // Window size arguments (must match viewport)
         '--window-size=1920,1080',
-        '--start-maximized', // Pretend to be maximized
-        
-        // User agent (use a recent Chrome version)
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        
-        // Additional stealth
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-breakpad',
-        '--disable-component-update',
-        '--disable-default-apps',
-        '--disable-domain-reliability',
-        '--disable-sync',
-        '--metrics-recording-only',
-        '--safebrowsing-disable-auto-update',
-        '--password-store=basic',
-        '--use-mock-keychain',
+        // Keep existing behavior for some sites; avoid adding redundant sandbox/dev-shm flags (already in chromium.args).
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
       ],
+      executablePath,
       timeout: TIMEOUT_MS
     });
+    } catch (launchError) {
+      if (!isServerless && !localExecutablePath) {
+        console.error(
+          `[SCREENSHOT] Chromium launch failed in local dev without a configured browser binary. ` +
+          `Set CHROMIUM_EXECUTABLE_PATH to a local Chromium/Chrome executable path, ` +
+          `or run this route in Linux/serverless where @sparticuz/chromium can provide the binary.`
+        );
+      }
+      throw launchError;
+    }
 
     console.log(`[SCREENSHOT] Browser launched successfully`);
 

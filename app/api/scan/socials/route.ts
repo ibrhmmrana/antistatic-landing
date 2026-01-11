@@ -13,6 +13,9 @@ import { Options as ChromeOptions, ServiceBuilder } from "selenium-webdriver/chr
 import * as path from "path";
 import * as fs from "fs";
 
+// Force Node.js runtime (Selenium is not compatible with Edge runtime)
+export const runtime = "nodejs";
+
 // In-memory cache to prevent duplicate scraper executions
 // Key: scanId, Value: { status: 'running' | 'completed', result?: any, promise?: Promise<any> }
 const scraperCache = new Map<string, { status: 'running' | 'completed', result?: any, promise?: Promise<any> }>();
