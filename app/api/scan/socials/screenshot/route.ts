@@ -509,14 +509,71 @@ async function setupStealth(page: Page): Promise<void> {
 }
 
 /**
+ * Detects if the page is showing a login wall (gated content).
+ * Returns true if login wall is detected.
+ */
+async function detectLoginWall(page: Page, platform: string): Promise<{ isGated: boolean; reason?: string }> {
+  try {
+    const currentUrl = page.url().toLowerCase();
+    
+    // Instagram login detection
+    if (platform === 'instagram') {
+      // Check URL for login redirect
+      if (currentUrl.includes('/accounts/login') || currentUrl.includes('/accounts/emailsignup')) {
+        return { isGated: true, reason: 'Redirected to Instagram login page' };
+      }
+      
+      // Check for login form elements
+      const hasLoginForm = await page.locator('input[name="username"], input[name="password"], form[id="loginForm"]').first().isVisible({ timeout: 1000 }).catch(() => false);
+      if (hasLoginForm) {
+        return { isGated: true, reason: 'Instagram login form detected' };
+      }
+      
+      // Check for "Log in" button prominence
+      const hasLoginButton = await page.locator('button:has-text("Log in"), a:has-text("Log in")').first().isVisible({ timeout: 1000 }).catch(() => false);
+      const hasSignupPrompt = await page.locator('text=/Sign up to see photos/i, text=/Log in to Instagram/i').first().isVisible({ timeout: 1000 }).catch(() => false);
+      if (hasLoginButton && hasSignupPrompt) {
+        return { isGated: true, reason: 'Instagram signup/login prompt detected' };
+      }
+    }
+    
+    // Facebook login detection
+    if (platform === 'facebook') {
+      // Check URL for login redirect
+      if (currentUrl.includes('/login') || currentUrl.includes('/checkpoint')) {
+        return { isGated: true, reason: 'Redirected to Facebook login page' };
+      }
+      
+      // Check for login form elements
+      const hasLoginForm = await page.locator('input[name="email"], input[name="pass"], form[action*="login"]').first().isVisible({ timeout: 1000 }).catch(() => false);
+      if (hasLoginForm && currentUrl.includes('facebook.com') && !currentUrl.includes('/profile') && !currentUrl.includes('/pages')) {
+        // Only flag if it's prominently a login page, not just the small login box on profile pages
+        const isFullPageLogin = await page.locator('#login_form, form[data-testid="royal_login_form"]').first().isVisible({ timeout: 500 }).catch(() => false);
+        if (isFullPageLogin) {
+          return { isGated: true, reason: 'Facebook login page detected' };
+        }
+      }
+    }
+    
+    return { isGated: false };
+  } catch (error) {
+    console.warn(`[SCREENSHOT] Login wall detection error:`, error);
+    return { isGated: false }; // Fail open - don't block on detection errors
+  }
+}
+
+/**
  * Takes a screenshot of a social media profile or website.
  * Routes to simple approach for websites, complex stealth for social media.
+ * 
+ * IMPORTANT: For Instagram/Facebook, ALWAYS uses DESKTOP viewport to avoid login walls.
+ * Mobile viewports trigger aggressive login gating on these platforms.
  */
 async function captureScreenshot(
   url: string,
   viewport: 'desktop' | 'mobile',
   platformParam?: string
-): Promise<{ success: boolean; screenshot?: string; error?: string }> {
+): Promise<{ success: boolean; screenshot?: string; error?: string; gated?: boolean }> {
   // Detect platform early
   let platform = platformParam || 'unknown';
   if (platform === 'unknown') {
@@ -535,12 +592,19 @@ async function captureScreenshot(
     return captureWebsiteScreenshot(url);
   }
 
-  // For social media (Instagram, Facebook), use stealth approach
+  // IMPORTANT: Force DESKTOP for social media regardless of requested viewport
+  // Mobile viewports trigger login walls on Instagram/Facebook
+  const effectiveViewport: 'desktop' | 'mobile' = 'desktop';
+  if (viewport === 'mobile') {
+    console.log(`[SCREENSHOT] ⚠️ Requested mobile viewport, but forcing DESKTOP for ${platform} to avoid login walls`);
+  }
+
+  // For social media (Instagram, Facebook), use stealth approach with DESKTOP
   let browser: Browser | null = null;
   let page: Page | null = null;
 
   try {
-    console.log(`[SCREENSHOT] Starting ${platform} capture for ${viewport} viewport`);
+    console.log(`[SCREENSHOT] Starting ${platform} capture for ${effectiveViewport} viewport (forced desktop for social media)`);
     console.log(`[SCREENSHOT] URL: ${url}`);
 
       const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
@@ -580,17 +644,19 @@ async function captureScreenshot(
 
       console.log(`[SCREENSHOT] Browser launched successfully`);
 
-      // Create context with appropriate viewport and user agent
-      const viewportConfig = VIEWPORTS[viewport];
-      const userAgent = USER_AGENTS[viewport];
+      // Create context with DESKTOP viewport and user agent for social media
+      // Using forced effectiveViewport (always 'desktop' for social media)
+      const viewportConfig = VIEWPORTS[effectiveViewport];
+      const userAgent = USER_AGENTS[effectiveViewport];
 
       const context = await browser.newContext({
         viewport: viewportConfig,
         userAgent: userAgent,
         // Add device scale factor to look more realistic
         deviceScaleFactor: 1,
-        isMobile: viewport === 'mobile',
-        hasTouch: viewport === 'mobile',
+        // ALWAYS false for social media - mobile triggers login walls
+        isMobile: false,
+        hasTouch: false,
         // Disable JavaScript-based detection
         javaScriptEnabled: true,
         // Add permissions
@@ -728,6 +794,16 @@ async function captureScreenshot(
 
       // At this point, we're only handling social media (instagram/facebook)
       // Websites are handled by captureWebsiteScreenshot() above
+      
+      // STEP 1: Detect login walls BEFORE any modifications
+      console.log(`[SCREENSHOT] Checking for login wall on ${platform}...`);
+      const loginWallCheck = await detectLoginWall(page, platform);
+      if (loginWallCheck.isGated) {
+        console.warn(`[SCREENSHOT] ⚠️ Login wall detected: ${loginWallCheck.reason}`);
+        // Still take the screenshot but mark as gated - UI can show "Preview unavailable"
+      }
+      
+      // STEP 2: Try to dismiss popups and remove login prompts
       console.log(`[SCREENSHOT] ${platform} detected, dismissing popups...`);
       await dismissSocialMediaPopups(page, platform);
       
@@ -737,12 +813,18 @@ async function captureScreenshot(
       } else if (platform === 'instagram') {
         await removeInstagramPrompts(page);
       }
+      
+      // STEP 3: Re-check for login wall after cleanup (in case it improved)
+      const postCleanupCheck = await detectLoginWall(page, platform);
+      const finalGatedStatus = postCleanupCheck.isGated;
+      if (loginWallCheck.isGated && !postCleanupCheck.isGated) {
+        console.log(`[SCREENSHOT] ✅ Login wall was successfully dismissed`);
+      } else if (postCleanupCheck.isGated) {
+        console.warn(`[SCREENSHOT] ⚠️ Login wall persists after cleanup: ${postCleanupCheck.reason}`);
+      }
 
-      // Take screenshot
-      // For mobile: capture viewport only
-      // For desktop social media: capture full page
-      const isMobile = viewport === 'mobile';
-      const useFullPage = !isMobile; // Full-page for desktop social media, viewport for mobile
+      // Take screenshot - always use full page for desktop social media
+      const useFullPage = true; // Always full page since we force desktop
       
       console.log(`[SCREENSHOT] Capturing ${useFullPage ? 'full-page' : 'viewport'} screenshot...`);
       const screenshotStartTime = Date.now();
@@ -760,11 +842,12 @@ async function captureScreenshot(
       const dataUrl = `data:image/png;base64,${base64Screenshot}`;
       
       console.log(`[SCREENSHOT] Screenshot converted to base64 (${base64Screenshot.length} chars)`);
-      console.log(`[SCREENSHOT] ✅ Screenshot capture successful`);
+      console.log(`[SCREENSHOT] ✅ Screenshot capture successful${finalGatedStatus ? ' (but content is gated)' : ''}`);
 
       return {
         success: true,
-        screenshot: dataUrl
+        screenshot: dataUrl,
+        gated: finalGatedStatus, // true if login wall was detected - UI can show "Preview unavailable"
       };
 
     } catch (error) {

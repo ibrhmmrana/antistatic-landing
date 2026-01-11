@@ -1157,11 +1157,12 @@ export async function POST(request: NextRequest) {
     // Log what screenshots we're going to capture
     console.log(`[API] Preparing to capture screenshots for ${socialLinks.length} social links + ${websiteUrlToUse ? '1 website' : '0 websites'}`);
     
-    // Capture mobile screenshots for social media links
+    // IMPORTANT: Use DESKTOP viewport for social media (Instagram/Facebook)
+    // Mobile viewports trigger login walls on these platforms
     for (const link of socialLinks) {
-      console.log(`[API] Queuing screenshot for ${link.platform}: ${link.url}`);
+      console.log(`[API] Queuing DESKTOP screenshot for ${link.platform}: ${link.url}`);
       screenshotPromises.push(
-        captureSocialScreenshot(link.platform, link.url, 'mobile')
+        captureSocialScreenshot(link.platform, link.url, 'desktop')
       );
     }
 
