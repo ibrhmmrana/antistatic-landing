@@ -233,16 +233,16 @@ export default function StageOnlinePresence({
             </div>
             <div className="w-8" />
           </div>
-          {/* Page area */}
-          <div className="bg-white overflow-hidden" style={{ maxHeight: '400px' }}>
+          {/* Page area - maintains 16:10 aspect ratio (1440:900 viewport) */}
+          <div className="bg-white overflow-hidden" style={{ aspectRatio: '16 / 10' }}>
             {screenshot ? (
               <img
                 src={screenshot}
                 alt="Website screenshot"
-                className="w-full h-auto object-top"
+                className="w-full h-full object-cover object-top"
               />
             ) : hasError ? (
-              <div className="w-full h-64 bg-gray-50 flex flex-col items-center justify-center">
+              <div className="w-full h-full bg-gray-50 flex flex-col items-center justify-center">
                 <div className="text-gray-400 text-sm mb-2">Unable to capture screenshot</div>
                 {url && (
                   <a 
@@ -256,7 +256,7 @@ export default function StageOnlinePresence({
                 )}
               </div>
             ) : (
-              <div className="w-full h-64 bg-gray-50 flex items-center justify-center">
+              <div className="w-full h-full bg-gray-50 flex items-center justify-center">
                 <div className="text-gray-400 text-sm">Loading website...</div>
               </div>
             )}
