@@ -532,101 +532,19 @@ async function logPageElements(page: Page, context: string): Promise<void> {
 }
 
 /**
- * Handles Instagram security challenge if present
- * Returns true if challenge was handled, false otherwise
+ * Checks if we're on an Instagram security challenge page
+ * Returns true if challenge page detected, false otherwise
  */
-async function handleInstagramChallenge(page: Page): Promise<boolean> {
-  console.log(`[SCREENSHOT] Checking for Instagram challenge page...`);
-  
+async function isInstagramChallengePage(page: Page): Promise<boolean> {
   const currentUrl = page.url();
   const isChallengePage = currentUrl.includes('/challenge/');
   
-  if (!isChallengePage) {
-    console.log(`[SCREENSHOT] No challenge page detected`);
-    return false;
+  if (isChallengePage) {
+    console.log(`[SCREENSHOT] 🔐 Challenge page detected! URL: ${currentUrl}`);
+    await logPageElements(page, 'Challenge page detected');
   }
   
-  console.log(`[SCREENSHOT] 🔐 Challenge page detected! URL: ${currentUrl}`);
-  
-  // Log elements on challenge page
-  await logPageElements(page, 'Challenge page detected');
-  
-  try {
-    // Look for "Next" button - it's a div[role="button"] with text "Next"
-    console.log(`[SCREENSHOT] Looking for "Next" button on challenge page...`);
-    const nextButton = page.locator('div[role="button"]:has-text("Next")').first();
-    
-    if (await nextButton.isVisible({ timeout: 5000 })) {
-      console.log(`[SCREENSHOT] Found "Next" button, checking if enabled...`);
-      
-      // Check if button is disabled and wait for it to become enabled
-      const isEnabled = await nextButton.evaluate((el) => {
-        const div = el as HTMLElement;
-        const ariaDisabled = div.getAttribute('aria-disabled');
-        const tabIndex = div.getAttribute('tabindex');
-        // Button is enabled if aria-disabled is not "true" and tabindex is not "-1"
-        return ariaDisabled !== 'true' && tabIndex !== '-1';
-      });
-      
-      if (!isEnabled) {
-        console.log(`[SCREENSHOT] "Next" button is disabled, waiting for it to become enabled...`);
-        // Wait for button to become enabled (check every 500ms for up to 10 seconds)
-        let enabled = false;
-        for (let i = 0; i < 20; i++) {
-          await page.waitForTimeout(500);
-          enabled = await nextButton.evaluate((el) => {
-            const div = el as HTMLElement;
-            const ariaDisabled = div.getAttribute('aria-disabled');
-            const tabIndex = div.getAttribute('tabindex');
-            return ariaDisabled !== 'true' && tabIndex !== '-1';
-          });
-          if (enabled) {
-            console.log(`[SCREENSHOT] "Next" button is now enabled!`);
-            break;
-          }
-        }
-        
-        if (!enabled) {
-          console.log(`[SCREENSHOT] ⚠️ "Next" button did not become enabled, trying JavaScript click...`);
-          // Try JavaScript click as fallback
-          await nextButton.evaluate((el) => {
-            (el as HTMLElement).click();
-          });
-          console.log(`[SCREENSHOT] ✅ Clicked "Next" button via JavaScript`);
-        } else {
-          await nextButton.click();
-          console.log(`[SCREENSHOT] ✅ Clicked "Next" button on challenge page`);
-        }
-      } else {
-        await nextButton.click();
-        console.log(`[SCREENSHOT] ✅ Clicked "Next" button on challenge page`);
-      }
-      
-      // Wait for navigation/response
-      await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
-      await page.waitForTimeout(3000);
-      
-      // Check if we're still on challenge page or moved forward
-      const newUrl = page.url();
-      console.log(`[SCREENSHOT] URL after clicking Next: ${newUrl}`);
-      
-      if (newUrl.includes('/challenge/')) {
-        console.log(`[SCREENSHOT] Still on challenge page, may need additional steps`);
-        // Log elements again to see what's available
-        await logPageElements(page, 'Still on challenge page after Next');
-      } else {
-        console.log(`[SCREENSHOT] ✅ Challenge appears to be completed`);
-      }
-      
-      return true;
-    } else {
-      console.log(`[SCREENSHOT] "Next" button not found on challenge page`);
-      return false;
-    }
-  } catch (error) {
-    console.error(`[SCREENSHOT] Error handling challenge:`, error);
-    return false;
-  }
+  return isChallengePage;
 }
 
 /**
@@ -754,8 +672,8 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     // Log elements after clicking login
     await logPageElements(page, 'After clicking login button');
     
-    // Check if we're on a challenge page and handle it
-    const challengeHandled = await handleInstagramChallenge(page);
+    // Check if we're on a challenge page - if so, we'll navigate directly to profile instead
+    const isChallenge = await isInstagramChallengePage(page);
     
     // Check if we're still on login page (login might have failed)
     const stillOnLogin = await page.evaluate(() => {
@@ -771,11 +689,9 @@ async function handleInstagramLoginIfNeeded(page: Page): Promise<boolean> {
     console.log(`[SCREENSHOT] ✅ Login appears successful!`);
     console.log(`[SCREENSHOT] Current URL after login: ${page.url()}`);
     
-    // If challenge was handled, wait a bit more for any redirects
-    if (challengeHandled) {
-      await page.waitForTimeout(2000);
-      // Check if we need to handle another challenge step
-      await handleInstagramChallenge(page);
+    // If we're on a challenge page, return true so we can navigate directly to profile
+    if (isChallenge) {
+      console.log(`[SCREENSHOT] On challenge page - will navigate directly to profile URL`);
     }
     
     // Handle "Save Login Info" or other "Not now" popups after login
@@ -1525,27 +1441,37 @@ async function captureScreenshot(
         const loggedIn = await handleInstagramLoginIfNeeded(page);
         
         if (loggedIn) {
-          // After login, navigate to the profile URL again
-          console.log(`[SCREENSHOT] Navigating to profile after login: ${normalizedUrl}`);
-          await page.goto(normalizedUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: TIMEOUT_MS
-          });
-          await page.waitForTimeout(2000);
+          // Check if we're currently on a challenge page
+          const isChallenge = await isInstagramChallengePage(page);
           
-          // Check if we got redirected to challenge or login page
-          const currentUrl = page.url();
-          if (currentUrl.includes('/challenge/')) {
-            console.log(`[SCREENSHOT] Redirected to challenge page, handling...`);
-            await handleInstagramChallenge(page);
-            // Try navigating to profile again after challenge
+          if (isChallenge) {
+            // If on challenge page, navigate directly to profile URL (skip challenge)
+            console.log(`[SCREENSHOT] On challenge page - navigating directly to profile: ${normalizedUrl}`);
+            await page.goto(normalizedUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: TIMEOUT_MS
+            });
+            await page.waitForTimeout(3000);
+          } else {
+            // After login, navigate to the profile URL again
+            console.log(`[SCREENSHOT] Navigating to profile after login: ${normalizedUrl}`);
             await page.goto(normalizedUrl, {
               waitUntil: 'domcontentloaded',
               timeout: TIMEOUT_MS
             });
             await page.waitForTimeout(2000);
-          } else if (currentUrl.includes('/accounts/login/')) {
-            console.log(`[SCREENSHOT] ⚠️ Still redirected to login page - challenge may not be complete`);
+          }
+          
+          // Check final URL after navigation
+          const currentUrl = page.url();
+          console.log(`[SCREENSHOT] Final URL after navigation: ${currentUrl}`);
+          
+          if (currentUrl.includes('/accounts/login/')) {
+            console.log(`[SCREENSHOT] ⚠️ Still redirected to login page`);
+          } else if (currentUrl.includes('/challenge/')) {
+            console.log(`[SCREENSHOT] ⚠️ Still on challenge page - may need manual intervention`);
+          } else {
+            console.log(`[SCREENSHOT] ✅ Successfully navigated to profile or content page`);
           }
           
           // Log elements after navigating to profile
