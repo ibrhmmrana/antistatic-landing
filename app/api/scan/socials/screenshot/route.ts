@@ -6,7 +6,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { chromium, Browser, Page } from "playwright";
+import type { Browser, Page } from "playwright";
+
+// Force Node.js runtime (Playwright is not compatible with Edge runtime)
+export const runtime = "nodejs";
+
+// Ensure Playwright looks for browsers in a deploy-friendly location.
+// We also lazy-import Playwright later so this env var is applied before module init.
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = "0";
+}
 
 // Viewport configurations
 const VIEWPORTS = {
@@ -433,6 +442,9 @@ async function captureScreenshot(
   try {
     console.log(`[SCREENSHOT] Starting capture for ${viewport} viewport`);
     console.log(`[SCREENSHOT] URL: ${url}`);
+
+    // Lazy import Playwright AFTER setting PLAYWRIGHT_BROWSERS_PATH so deploys can locate Chromium.
+    const { chromium } = await import("playwright");
 
     // Launch browser with UNDETECTABLE headless mode
     // Note: Playwright's headless: true uses the new headless mode by default (more stealthy than old headless)

@@ -732,29 +732,17 @@ export async function POST(request: NextRequest) {
     // CRITICAL: Prevent duplicate execution using in-memory cache
     if (scanId) {
       const cached = scraperCache.get(scanId);
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:834',message:'Cache check',data:{scanId,hasCache:!!cached,cacheStatus:cached?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       
       if (cached) {
         if (cached.status === 'completed' && cached.result) {
           // Already completed, return cached result immediately
           console.log(`[API] Returning cached result for scanId: ${scanId}`);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:840',message:'Returning cached result (completed)',data:{scanId,hasWebsiteScreenshot:!!cached.result.websiteScreenshot,socialLinksCount:cached.result.socialLinks?.length,socialLinksWithScreenshots:cached.result.socialLinks?.filter((l:any)=>l.screenshot)?.length,cacheStatus:'completed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           return NextResponse.json(cached.result, { status: 200 });
         } else if (cached.status === 'running' && cached.promise) {
           // Already running, wait for existing promise
           console.log(`[API] Scraper already running for scanId: ${scanId}, waiting for completion...`);
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:844',message:'Waiting for running scraper',data:{scanId,cacheStatus:'running'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
           try {
             const result = await cached.promise;
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:756',message:'Running scraper completed, returning result',data:{scanId,hasWebsiteScreenshot:!!result.websiteScreenshot,socialLinksCount:result.socialLinks?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-            // #endregion
             return NextResponse.json(result, { status: 200 });
           } catch (error) {
             // If the running scraper failed, remove from cache and allow retry
@@ -791,16 +779,9 @@ export async function POST(request: NextRequest) {
 
     // Capture website screenshot (desktop) if website URL exists (from GBP API)
     if (websiteUrl) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:888',message:'Adding website screenshot to promises',data:{scanId,websiteUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-      // #endregion
       screenshotPromises.push(
         captureSocialScreenshot('website', websiteUrl, 'desktop')
       );
-    } else {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:892',message:'No website URL provided from GBP API',data:{scanId,providedWebsiteUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-      // #endregion
     }
 
     // Execute all screenshot captures in parallel
@@ -819,15 +800,9 @@ export async function POST(request: NextRequest) {
         } else if ('websiteScreenshot' in result) {
           // Website screenshot
           websiteScreenshot = result.websiteScreenshot;
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:909',message:'Website screenshot received',data:{scanId,hasWebsiteScreenshot:!!websiteScreenshot,websiteScreenshotLength:websiteScreenshot?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-          // #endregion
         }
       } else {
         console.error('Screenshot capture failed:', settledResult.reason);
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:915',message:'Screenshot capture failed',data:{scanId,error:settledResult.reason instanceof Error ? settledResult.reason.message : 'Unknown'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-        // #endregion
       }
     }
 
@@ -844,18 +819,11 @@ export async function POST(request: NextRequest) {
         scanId,
       };
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:907',message:'Scraper result prepared',data:{scanId,hasWebsiteScreenshot:!!websiteScreenshot,socialLinksCount:socialScreenshots.length,socialLinksWithScreenshots:socialScreenshots.filter((l:any)=>l.screenshot).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-
       // Cache the result
       // CRITICAL: Update cache to 'completed' status BEFORE storing metadata in localStorage
       // This ensures the cache is ready when StageOnlinePresence tries to fetch
       if (scanId) {
         scraperCache.set(scanId, { status: 'completed', result });
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:922',message:'Result cached with completed status',data:{scanId,resultKeys:Object.keys(result),hasWebsiteScreenshot:!!result.websiteScreenshot,socialLinksCount:result.socialLinks?.length,socialLinksWithScreenshots:result.socialLinks?.filter((l:any)=>l.screenshot)?.length,cacheStatus:'completed'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         // Clean up cache after 1 hour to prevent memory leaks
         setTimeout(() => {
           scraperCache.delete(scanId);
@@ -872,15 +840,9 @@ export async function POST(request: NextRequest) {
       const existingCache = scraperCache.get(scanId);
       if (!existingCache || existingCache.status !== 'completed') {
         scraperCache.set(scanId, { status: 'running', promise: scraperPromise });
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:870',message:'Setting cache to running status',data:{scanId,hadExistingCache:!!existingCache,existingCacheStatus:existingCache?.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
       } else {
         // Cache already completed, return it immediately instead of starting new scraper
         console.log(`[API] Cache already completed for scanId: ${scanId}, returning cached result`);
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'app/api/scan/socials/route.ts:876',message:'Cache already completed, returning without starting new scraper',data:{scanId,hasWebsiteScreenshot:!!existingCache.result?.websiteScreenshot,socialLinksCount:existingCache.result?.socialLinks?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-        // #endregion
         return NextResponse.json(existingCache.result, { status: 200 });
       }
     }

@@ -46,9 +46,6 @@ export default function ReportScanClient({
       const existingScreenshot = localStorage.getItem(`websiteScreenshot_${scanId}`);
       if (existingScreenshot) {
         console.log('[WEBSITE SCREENSHOT] Already exists in localStorage, skipping...');
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:45',message:'Website screenshot already exists, skipping',data:{scanId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-        // #endregion
         return;
       }
       
@@ -56,9 +53,6 @@ export default function ReportScanClient({
       
       try {
         console.log(`[WEBSITE SCREENSHOT] Starting immediate capture for: ${websiteUrl}`);
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:55',message:'Triggering immediate website screenshot',data:{scanId,websiteUrl},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-        // #endregion
         
         const response = await fetch('/api/scan/socials/screenshot', {
           method: 'POST',
@@ -72,62 +66,34 @@ export default function ReportScanClient({
 
         if (response.ok) {
           const result = await response.json();
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:69',message:'Website screenshot captured',data:{scanId,hasScreenshot:!!result.screenshot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-          // #endregion
           
           // Do NOT store the screenshot locally (avoids quota errors).
           // It remains available via the API cache when StageOnlinePresence fetches.
         } else {
           console.error('Failed to capture website screenshot:', await response.text());
           websiteScreenshotTriggeredRef.current = false; // Reset on failure to allow retry
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:87',message:'Website screenshot capture failed',data:{scanId,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-          // #endregion
         }
       } catch (error) {
         console.error('Error capturing website screenshot:', error);
         websiteScreenshotTriggeredRef.current = false; // Reset on failure to allow retry
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:91',message:'Exception in website screenshot capture',data:{scanId,error:error instanceof Error ? error.message : 'Unknown'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-        // #endregion
       }
     };
 
     const fetchDetails = async () => {
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:111',message:'Fetching place details',data:{scanId,placeId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-        // #endregion
         const response = await fetch(`/api/places/details?placeId=${encodeURIComponent(placeId)}`);
         if (response.ok) {
           const data = await response.json();
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:116',message:'Place details fetched',data:{scanId,hasWebsite:!!data.website,website:data.website},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-          // #endregion
           setPlaceDetails(data);
           
           // Immediately capture website screenshot if website URL is available
           if (data.website) {
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:121',message:'Calling captureWebsiteScreenshot',data:{scanId,website:data.website},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-            // #endregion
             captureWebsiteScreenshot(data.website);
-          } else {
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:124',message:'No website URL in place details',data:{scanId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-            // #endregion
           }
         } else {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:127',message:'Failed to fetch place details',data:{scanId,status:response.status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-          // #endregion
         }
       } catch (error) {
         console.error("Failed to fetch place details:", error);
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:131',message:'Exception fetching place details',data:{scanId,error:error instanceof Error ? error.message : 'Unknown'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-        // #endregion
       }
     };
 
@@ -169,9 +135,6 @@ export default function ReportScanClient({
 
         if (response.ok) {
           const result = await response.json();
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:65',message:'API response received in ReportScanClient',data:{scanId,hasWebsiteScreenshot:!!result.websiteScreenshot,socialLinksCount:result.socialLinks?.length,socialLinksWithScreenshots:result.socialLinks?.filter((l:any)=>l.screenshot)?.length,resultKeys:Object.keys(result)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-          // #endregion
           // Store metadata + URLs to screenshots (NOT the actual base64 data - too large for localStorage)
           const dataToStore = {
             websiteUrl: result.websiteUrl,
@@ -187,17 +150,11 @@ export default function ReportScanClient({
             screenshotsReady: !!(result.websiteScreenshot || (result.socialLinks && result.socialLinks.some((l: any) => l.screenshot))),
           };
           
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:75',message:'Storing metadata in localStorage (screenshots only in API cache)',data:{scanId,dataToStoreKeys:Object.keys(dataToStore),socialLinksCount:dataToStore.socialLinks.length,hasWebsiteScreenshot:dataToStore.hasWebsiteScreenshot,screenshotsReady:dataToStore.screenshotsReady},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-          // #endregion
           try {
             localStorage.setItem(`onlinePresence_${scanId}`, JSON.stringify(dataToStore));
           } catch (error) {
             // If localStorage fails, log but don't block - API cache will still work
             console.warn('Failed to store in localStorage (quota exceeded?):', error);
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/e3df070f-faca-4b3e-b1d2-b9a4f782fea3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'components/report/ReportScanClient.tsx:83',message:'localStorage setItem failed',data:{scanId,error:error instanceof Error ? error.message : 'Unknown'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-            // #endregion
           }
         }
       } catch (err) {
