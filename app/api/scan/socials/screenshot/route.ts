@@ -1780,87 +1780,135 @@ async function captureScreenshot(
                 }
                 
                 const searchQuery = encodeURIComponent(searchQueryText);
-                await page.goto(`https://www.google.com/search?q=${searchQuery}`, { 
-                  waitUntil: 'domcontentloaded', 
-                  timeout: 15000 
+                // Use Google.com with hl=en to force English and avoid consent issues
+                const googleUrl = `https://www.google.com/search?q=${searchQuery}&hl=en`;
+                console.log(`[SCREENSHOT] Navigating to Google: ${googleUrl}`);
+                
+                await page.goto(googleUrl, { 
+                  waitUntil: 'networkidle', 
+                  timeout: 20000 
+                }).catch(() => {
+                  console.log(`[SCREENSHOT] Google networkidle timeout, proceeding anyway`);
                 });
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(3000);
                 
-                console.log(`[SCREENSHOT] Google search completed, looking for Instagram result...`);
+                // Debug: Log page state
+                const googlePageUrl = page.url();
+                const googlePageTitle = await page.title();
+                const googleBodyLength = await page.evaluate(() => document.body?.textContent?.length || 0);
+                console.log(`[SCREENSHOT] Google page state - URL: ${googlePageUrl}, Title: ${googlePageTitle}, Body length: ${googleBodyLength}`);
                 
-                // Try to dismiss Google consent/popup dialogs
+                // Check if we're on a consent page
+                const isConsentPage = googlePageUrl.includes('consent.google') || googlePageTitle.includes('Before you continue');
+                if (isConsentPage) {
+                  console.log(`[SCREENSHOT] Detected Google consent page, attempting to bypass...`);
+                }
+                
+                // Try to dismiss Google consent/popup dialogs - more aggressive approach
                 try {
                   // Multiple attempts to dismiss various Google popups
                   const popupSelectors = [
-                    'button:has-text("Reject all")',
+                    '#L2AGLb', // Google consent "I agree" button (most common)
+                    'button[id="L2AGLb"]',
+                    '[aria-label="Accept all"]',
                     'button:has-text("Accept all")',
+                    'button:has-text("Reject all")',
+                    'button:has-text("I agree")',
                     'button:has-text("Not now")',
                     'g-raised-button:has-text("Not now")',
                     '[role="button"]:has-text("Not now")',
-                    'button:has-text("I agree")',
-                    '#L2AGLb', // Google consent "I agree" button
-                    '[aria-label="Accept all"]',
+                    'form[action*="consent"] button',
+                    'div[role="dialog"] button',
                   ];
                   
+                  let popupDismissed = false;
                   for (const selector of popupSelectors) {
                     try {
                       const btn = await page.$(selector);
-                      if (btn && await btn.isVisible()) {
-                        console.log(`[SCREENSHOT] Clicking Google popup button: ${selector}`);
-                        await btn.click();
-                        await page.waitForTimeout(1000);
-                        break;
+                      if (btn) {
+                        const isVisible = await btn.isVisible().catch(() => false);
+                        if (isVisible) {
+                          console.log(`[SCREENSHOT] Clicking Google popup button: ${selector}`);
+                          await btn.click();
+                          await page.waitForTimeout(2000);
+                          popupDismissed = true;
+                          break;
+                        }
                       }
                     } catch (e) {
                       // Continue to next selector
                     }
                   }
+                  
+                  if (popupDismissed) {
+                    // Wait for search results to load after dismissing popup
+                    await page.waitForTimeout(2000);
+                  }
                 } catch (popupErr) {
-                  console.log(`[SCREENSHOT] Google popup handling: ${popupErr}`);
+                  console.log(`[SCREENSHOT] Google popup handling error: ${popupErr}`);
                 }
                 
-                // Debug: Log all links on the page
-                const allLinks = await page.$$eval('a[href*="instagram.com"]', links => 
+                console.log(`[SCREENSHOT] Google search completed, looking for Instagram result...`);
+                
+                // Debug: Log all links on the page (check for any href)
+                const allLinksCount = await page.$$eval('a', links => links.length);
+                console.log(`[SCREENSHOT] Total links on page: ${allLinksCount}`);
+                
+                // Debug: Log all Instagram links
+                const allInstagramLinks = await page.$$eval('a[href*="instagram"]', links => 
                   links.slice(0, 10).map(l => ({ href: l.getAttribute('href'), text: l.textContent?.slice(0, 50) }))
-                );
-                console.log(`[SCREENSHOT] Found ${allLinks.length} Instagram links on Google:`, JSON.stringify(allLinks));
+                ).catch(() => []);
+                console.log(`[SCREENSHOT] Found ${allInstagramLinks.length} Instagram links on Google:`, JSON.stringify(allInstagramLinks));
                 
                 // Find Instagram result with multiple selector strategies
                 let instagramLink = null;
                 const linkSelectors = [
                   `a[href*="instagram.com/${username}"]`,
                   `a[href*="instagram.com"][href*="${username}"]`,
-                  'a[href*="instagram.com"]:not([href*="support"]):not([href*="help"])',
+                  'a[href*="instagram.com"]:not([href*="support"]):not([href*="help"]):not([href*="about"])',
                 ];
                 
                 for (const selector of linkSelectors) {
-                  instagramLink = await page.$(selector);
-                  if (instagramLink) {
-                    const href = await instagramLink.getAttribute('href');
-                    console.log(`[SCREENSHOT] Found Instagram link with selector "${selector}": ${href}`);
-                    break;
+                  try {
+                    instagramLink = await page.$(selector);
+                    if (instagramLink) {
+                      const href = await instagramLink.getAttribute('href');
+                      console.log(`[SCREENSHOT] Found Instagram link with selector "${selector}": ${href}`);
+                      break;
+                    }
+                  } catch (e) {
+                    console.log(`[SCREENSHOT] Selector "${selector}" failed: ${e}`);
                   }
                 }
                 
                 if (!instagramLink) {
                   // Last resort: try clicking the first search result that mentions instagram
-                  const searchResults = await page.$$('div.g a, a[data-ved]');
-                  for (const result of searchResults) {
-                    const href = await result.getAttribute('href');
-                    if (href && href.includes('instagram.com')) {
-                      instagramLink = result;
-                      console.log(`[SCREENSHOT] Found Instagram link via search results: ${href}`);
-                      break;
+                  console.log(`[SCREENSHOT] Trying fallback: searching all links with data-ved...`);
+                  try {
+                    const searchResults = await page.$$('a[data-ved], div.g a, a[ping]');
+                    console.log(`[SCREENSHOT] Found ${searchResults.length} search result links`);
+                    for (const result of searchResults) {
+                      const href = await result.getAttribute('href');
+                      if (href && href.includes('instagram.com') && !href.includes('support') && !href.includes('help')) {
+                        instagramLink = result;
+                        console.log(`[SCREENSHOT] Found Instagram link via search results: ${href}`);
+                        break;
+                      }
                     }
+                  } catch (e) {
+                    console.log(`[SCREENSHOT] Fallback search failed: ${e}`);
                   }
                 }
                 
                 if (!instagramLink) {
+                  // Take a debug screenshot to see what Google is showing
+                  const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+                  console.log(`[SCREENSHOT] No Instagram link found. Page HTML length: ${await page.evaluate(() => document.documentElement.outerHTML.length)}`);
                   console.log(`[SCREENSHOT] No Instagram link found in Google results after all attempts`);
                   return {
                     success: false,
-                    error: `Instagram is blocking automation. Could not find profile via Google search.`,
-                    screenshot: await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined)
+                    error: `Instagram is blocking automation. Could not find profile via Google search. Google may be showing consent page or no results.`,
+                    screenshot: debugScreenshot
                   };
                 }
                 
