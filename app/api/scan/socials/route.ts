@@ -100,8 +100,9 @@ async function throwIfCaptcha(page: Page, stage: string): Promise<void> {
 }
 
 // In-memory cache to prevent duplicate scraper executions
-// Key: scanId, Value: { status: 'running' | 'completed', result?: any, promise?: Promise<any> }
-const scraperCache = new Map<string, { status: 'running' | 'completed', result?: any, promise?: Promise<any> }>();
+// Key: scanId, Value: { status: 'running' | 'completed', result?: any, promise?: Promise<any>, partialResult?: any }
+// partialResult is updated incrementally as screenshots complete
+const scraperCache = new Map<string, { status: 'running' | 'completed', result?: any, promise?: Promise<any>, partialResult?: any }>();
 
 /**
  * Helper function to capture a screenshot by calling the screenshot API
@@ -1563,16 +1564,22 @@ export async function POST(request: NextRequest) {
           // Already completed, return cached result
           console.log(`[API] Returning cached result for scanId: ${scanId}`);
           return NextResponse.json(cached.result, { status: 200 });
-        } else if (cached.status === 'running' && cached.promise) {
-          // Already running, wait for existing promise
-          console.log(`[API] Scraper already running for scanId: ${scanId}, waiting for completion...`);
-          try {
-            const result = await cached.promise;
-            return NextResponse.json(result, { status: 200 });
-          } catch (error) {
-            // If the running scraper failed, remove from cache and allow retry
-            scraperCache.delete(scanId);
-            throw error;
+        } else if (cached.status === 'running') {
+          // Already running - return partial result if available, otherwise wait
+          if (cached.partialResult) {
+            console.log(`[API] Scraper running for scanId: ${scanId}, returning partial result`);
+            return NextResponse.json(cached.partialResult, { status: 200 });
+          } else if (cached.promise) {
+            // No partial result yet, wait for existing promise
+            console.log(`[API] Scraper already running for scanId: ${scanId}, waiting for completion...`);
+            try {
+              const result = await cached.promise;
+              return NextResponse.json(result, { status: 200 });
+            } catch (error) {
+              // If the running scraper failed, remove from cache and allow retry
+              scraperCache.delete(scanId);
+              throw error;
+            }
           }
         }
       }
@@ -1646,6 +1653,26 @@ export async function POST(request: NextRequest) {
       
       console.log(`[API] Final social links count: ${socialLinks.length}`);
 
+    // Initialize partial result in cache before starting screenshots
+    // This allows frontend to poll and get incremental updates
+    if (scanId) {
+      const initialPartialResult = {
+        success: true,
+        businessName,
+        address,
+        socialLinks: [], // Start with empty array, will be updated incrementally
+        websiteUrl: websiteUrlToUse,
+        websiteScreenshot: null,
+        count: socialLinks.length,
+        scanId,
+      };
+      const cached = scraperCache.get(scanId);
+      if (cached && cached.status === 'running') {
+        scraperCache.set(scanId, { ...cached, partialResult: initialPartialResult });
+        console.log(`[API] Initialized partial result for incremental updates`);
+      }
+    }
+
     // Capture screenshots SEQUENTIALLY to avoid ETXTBSY error
     // (Multiple parallel Chromium launches conflict over /tmp/chromium binary)
     const screenshotStartTime = Date.now();
@@ -1665,6 +1692,27 @@ export async function POST(request: NextRequest) {
     console.log(`[API] Preparing to capture ${totalScreenshots} screenshots sequentially (${sortedSocialLinks.length} social + ${websiteUrlToUse ? '1 website' : '0 websites'})`);
     console.log(`[API] Screenshot order: ${sortedSocialLinks.map(l => l.platform).join(' -> ')}`);
     
+    // Initialize partial result for incremental updates
+    const updatePartialResult = () => {
+      if (scanId) {
+        const partialResult = {
+          success: true,
+          businessName,
+          address,
+          socialLinks: [...socialScreenshots], // Copy current array
+          websiteUrl: websiteUrlToUse,
+          websiteScreenshot,
+          count: socialLinks.length,
+          scanId,
+        };
+        const cached = scraperCache.get(scanId);
+        if (cached && cached.status === 'running') {
+          scraperCache.set(scanId, { ...cached, partialResult });
+          console.log(`[API] Updated partial result - ${socialScreenshots.length} social screenshots ready`);
+        }
+      }
+    };
+    
     // Capture social media screenshots one at a time
     // Pass business context to help with Google search bypass if Instagram blocks login
     for (const link of sortedSocialLinks) {
@@ -1674,6 +1722,8 @@ export async function POST(request: NextRequest) {
         if ('platform' in result) {
           console.log(`[API] Social screenshot for ${result.platform}: hasScreenshot=${!!result.screenshot}, status=${result.status}`);
           socialScreenshots.push(result);
+          // Update partial result after each screenshot completes
+          updatePartialResult();
         }
       } catch (error) {
         console.error(`[API] Screenshot capture for ${link.platform} FAILED:`, error);
@@ -1683,6 +1733,8 @@ export async function POST(request: NextRequest) {
           screenshot: null,
           status: 'error',
         });
+        // Update partial result even on error
+        updatePartialResult();
       }
       // Small delay between captures to ensure Chromium binary is released
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1696,9 +1748,13 @@ export async function POST(request: NextRequest) {
         if ('websiteScreenshot' in result) {
           console.log(`[API] Website screenshot: hasScreenshot=${!!result.websiteScreenshot}`);
           websiteScreenshot = result.websiteScreenshot;
+          // Update partial result after website screenshot completes
+          updatePartialResult();
         }
       } catch (error) {
         console.error(`[API] Website screenshot capture FAILED:`, error);
+        // Update partial result even on error
+        updatePartialResult();
       }
     }
     
