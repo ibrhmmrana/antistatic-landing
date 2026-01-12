@@ -743,11 +743,16 @@ async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promi
     // Instagram uses different selectors on different page versions:
     // - Old: input[name="username"]
     // - New: input[name="email"] with autocomplete="username webauthn"
+    // - Variant: input[aria-label="Phone number, username, or email"]
     const usernameSelectors = [
       'input[name="username"]',
       'input[name="email"]', // New Instagram login page uses name="email" for username
       'input[autocomplete*="username"]', // Matches "username" or "username webauthn"
-      'input[type="text"][aria-label*="username" i], input[type="text"][aria-label*="phone" i], input[type="text"][aria-label*="email" i]',
+      'input[aria-label*="username" i]', // Variant: aria-label contains "username"
+      'input[aria-label*="Phone number" i]', // Variant: "Phone number, username, or email"
+      'input[type="text"][aria-label*="phone" i]',
+      'input[type="text"][aria-label*="email" i]',
+      'input[type="email"]', // Some variants use type="email" for username
       'input[autocomplete="username"], input[placeholder*="username" i], input[placeholder*="phone" i]',
       'input[type="text"]',
     ];
@@ -786,11 +791,14 @@ async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promi
     // Password selectors - Instagram uses different names:
     // - Old: input[name="password"]
     // - New: input[name="pass"]
+    // - Variant: input[aria-label="Password"]
     const passwordSelectors = [
       'input[name="password"]',
       'input[name="pass"]', // New Instagram login page uses name="pass"
       'input[type="password"]',
-      'input[autocomplete="current-password"], input[aria-label*="password" i]',
+      'input[aria-label="Password"]', // Exact match for variant login page
+      'input[aria-label*="password" i]', // Case-insensitive partial match
+      'input[autocomplete="current-password"]',
     ];
     
     for (const selector of passwordSelectors) {
@@ -823,28 +831,45 @@ async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promi
     // Instagram uses different button structures on different page versions:
     // - Old: div[role="button"][aria-label="Log in"]
     // - New: div[role="none"] containing span with "Log in" text
+    // - Variant: div.html-div containing text "Log in" (no role attribute)
     console.log(`[SCREENSHOT] Looking for login button...`);
-    let loginButton = page.locator('div[role="button"][aria-label="Log in"]').first();
     
-    if (await loginButton.count() === 0) {
-      // New Instagram login page uses div[role="none"] with span containing "Log in"
-      loginButton = page.locator('div[role="none"]:has(span:text-is("Log in"))').first();
+    // Array of login button selectors in priority order
+    const loginButtonSelectors = [
+      'div[role="button"][aria-label="Log in"]',
+      'div[role="none"]:has(span:text-is("Log in"))',
+      'span:text-is("Log in")',
+      'button[type="submit"]:has-text("Log in")',
+      'button[type="submit"]',
+      'button:has-text("Log in")',
+      'button:has-text("Log In")',
+      // Variant login page: div with "Log in" text but no role attribute (class starts with html-div)
+      'div:text-is("Log in")',
+      'div:has-text("Log in"):not(:has(div:has-text("Log in")))', // Most specific div containing "Log in"
+      // Last resort: any div with role="button"
+      'div[role="button"]',
+    ];
+    
+    let loginButton = page.locator('div[role="button"][aria-label="Log in"]').first();
+    let foundLoginButton = false;
+    
+    for (const selector of loginButtonSelectors) {
+      try {
+        const locator = page.locator(selector).first();
+        const count = await locator.count();
+        if (count > 0 && await locator.isVisible()) {
+          loginButton = locator;
+          foundLoginButton = true;
+          console.log(`[SCREENSHOT] ✅ Found login button with selector: ${selector}`);
+          break;
+        }
+      } catch (e) {
+        // Continue to next selector
+      }
     }
-    if (await loginButton.count() === 0) {
-      // Try finding by the exact text
-      loginButton = page.locator('span:text-is("Log in")').first();
-    }
-    if (await loginButton.count() === 0) {
-      loginButton = page.locator('button[type="submit"]').filter({ hasText: 'Log in' });
-    }
-    if (await loginButton.count() === 0) {
-      loginButton = page.locator('button[type="submit"]').first();
-    }
-    if (await loginButton.count() === 0) {
-      loginButton = page.locator('button:has-text("Log in"), button:has-text("Log In")').first();
-    }
-    if (await loginButton.count() === 0) {
-      // Last resort: any button or clickable div
+    
+    if (!foundLoginButton) {
+      console.log(`[SCREENSHOT] ⚠️ No login button found with specific selectors, using first div[role="button"]`);
       loginButton = page.locator('div[role="button"]').first();
     }
     
@@ -1916,16 +1941,26 @@ async function captureScreenshot(
                 }
                 
                 // If still no match, check if ANY Instagram result contains our username and extract profile
+                // But SKIP special paths like /p/, /reel/, /stories/, /explore/, /accounts/, /tags/, etc.
                 if (!instagramProfileUrl) {
+                  const specialPaths = ['p', 'reel', 'stories', 'explore', 'accounts', 'tags', 'about', 'directory', 'developer', 'help', 'legal', 'api'];
+                  
                   for (const item of cseItems) {
                     const link = item.link || '';
                     // Try to extract username from any Instagram URL
                     const urlMatch = link.match(/instagram\.com\/([^\/\?]+)/);
                     if (urlMatch && urlMatch[1]) {
-                      const extractedUsername = urlMatch[1].toLowerCase();
-                      if (extractedUsername === username.toLowerCase() ||
-                          extractedUsername.includes(username.toLowerCase()) ||
-                          username.toLowerCase().includes(extractedUsername)) {
+                      const extractedSegment = urlMatch[1].toLowerCase();
+                      
+                      // Skip if the extracted segment is a special path (not a username)
+                      if (specialPaths.includes(extractedSegment)) {
+                        console.log(`[SCREENSHOT] Skipping special path URL: ${link}`);
+                        continue;
+                      }
+                      
+                      if (extractedSegment === username.toLowerCase() ||
+                          extractedSegment.includes(username.toLowerCase()) ||
+                          username.toLowerCase().includes(extractedSegment)) {
                         instagramProfileUrl = `https://www.instagram.com/${urlMatch[1]}/`;
                         console.log(`[SCREENSHOT] Extracted profile from result: ${instagramProfileUrl} (from: ${link})`);
                         break;
@@ -1934,14 +1969,12 @@ async function captureScreenshot(
                   }
                 }
                 
+                // Last resort: if CSE results don't help, try constructing profile URL directly from the original username
                 if (!instagramProfileUrl) {
-                  console.log(`[SCREENSHOT] No Instagram profile URL found in CSE results`);
-                  console.log(`[SCREENSHOT] CSE results:`, JSON.stringify(cseItems.slice(0, 3).map((i: { link?: string; title?: string }) => ({ link: i.link, title: i.title }))));
-                  return {
-                    success: false,
-                    error: `Instagram is blocking automation. Could not find profile via Google CSE API.`,
-                    screenshot: loginResult.debugScreenshot
-                  };
+                  console.log(`[SCREENSHOT] CSE results don't contain usable profile URL, constructing from username...`);
+                  console.log(`[SCREENSHOT] CSE results were:`, JSON.stringify(cseItems.slice(0, 3).map((i: { link?: string; title?: string }) => ({ link: i.link, title: i.title }))));
+                  instagramProfileUrl = `https://www.instagram.com/${username}/`;
+                  console.log(`[SCREENSHOT] Using constructed profile URL: ${instagramProfileUrl}`);
                 }
                 
                 console.log(`[SCREENSHOT] Found Instagram profile via CSE: ${instagramProfileUrl}`);
