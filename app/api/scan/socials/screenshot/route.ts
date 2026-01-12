@@ -1773,22 +1773,75 @@ async function captureScreenshot(
                 
                 console.log(`[SCREENSHOT] Google search completed, looking for Instagram result...`);
                 
-                // Try to dismiss "Before you continue" popup on Google
+                // Try to dismiss Google consent/popup dialogs
                 try {
-                  const notNowButton = await page.$('button:has-text("Not now"), g-raised-button:has-text("Not now"), [role="button"]:has-text("Not now")');
-                  if (notNowButton) {
-                    console.log(`[SCREENSHOT] Dismissing Google popup...`);
-                    await notNowButton.click();
-                    await page.waitForTimeout(1000);
+                  // Multiple attempts to dismiss various Google popups
+                  const popupSelectors = [
+                    'button:has-text("Reject all")',
+                    'button:has-text("Accept all")',
+                    'button:has-text("Not now")',
+                    'g-raised-button:has-text("Not now")',
+                    '[role="button"]:has-text("Not now")',
+                    'button:has-text("I agree")',
+                    '#L2AGLb', // Google consent "I agree" button
+                    '[aria-label="Accept all"]',
+                  ];
+                  
+                  for (const selector of popupSelectors) {
+                    try {
+                      const btn = await page.$(selector);
+                      if (btn && await btn.isVisible()) {
+                        console.log(`[SCREENSHOT] Clicking Google popup button: ${selector}`);
+                        await btn.click();
+                        await page.waitForTimeout(1000);
+                        break;
+                      }
+                    } catch (e) {
+                      // Continue to next selector
+                    }
                   }
                 } catch (popupErr) {
-                  // Ignore popup dismissal errors
+                  console.log(`[SCREENSHOT] Google popup handling: ${popupErr}`);
                 }
                 
-                // Find and click the first Instagram result
-                const instagramLink = await page.$(`a[href*="instagram.com/${username}"]`);
+                // Debug: Log all links on the page
+                const allLinks = await page.$$eval('a[href*="instagram.com"]', links => 
+                  links.slice(0, 10).map(l => ({ href: l.getAttribute('href'), text: l.textContent?.slice(0, 50) }))
+                );
+                console.log(`[SCREENSHOT] Found ${allLinks.length} Instagram links on Google:`, JSON.stringify(allLinks));
+                
+                // Find Instagram result with multiple selector strategies
+                let instagramLink = null;
+                const linkSelectors = [
+                  `a[href*="instagram.com/${username}"]`,
+                  `a[href*="instagram.com"][href*="${username}"]`,
+                  'a[href*="instagram.com"]:not([href*="support"]):not([href*="help"])',
+                ];
+                
+                for (const selector of linkSelectors) {
+                  instagramLink = await page.$(selector);
+                  if (instagramLink) {
+                    const href = await instagramLink.getAttribute('href');
+                    console.log(`[SCREENSHOT] Found Instagram link with selector "${selector}": ${href}`);
+                    break;
+                  }
+                }
+                
                 if (!instagramLink) {
-                  console.log(`[SCREENSHOT] No Instagram link found in Google results`);
+                  // Last resort: try clicking the first search result that mentions instagram
+                  const searchResults = await page.$$('div.g a, a[data-ved]');
+                  for (const result of searchResults) {
+                    const href = await result.getAttribute('href');
+                    if (href && href.includes('instagram.com')) {
+                      instagramLink = result;
+                      console.log(`[SCREENSHOT] Found Instagram link via search results: ${href}`);
+                      break;
+                    }
+                  }
+                }
+                
+                if (!instagramLink) {
+                  console.log(`[SCREENSHOT] No Instagram link found in Google results after all attempts`);
                   return {
                     success: false,
                     error: `Instagram is blocking automation. Could not find profile via Google search.`,
