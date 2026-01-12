@@ -1673,33 +1673,39 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Capture screenshots SEQUENTIALLY to avoid ETXTBSY error
-    // (Multiple parallel Chromium launches conflict over /tmp/chromium binary)
+    // Capture screenshots in PARALLEL for social media (Facebook and Instagram)
+    // Each screenshot updates partial result as soon as it completes, so frontend can display immediately
     const screenshotStartTime = Date.now();
-    const socialScreenshots: Array<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' }> = [];
+    
+    // Keep social links in original order for consistent result ordering
+    const sortedSocialLinks = [...socialLinks];
+    
+    // Initialize socialScreenshots array with correct length (filled with placeholders that will be replaced)
+    // Type matches what captureSocialScreenshot returns: 'success' | 'error'
+    const socialScreenshots: Array<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' }> = 
+      sortedSocialLinks.map(link => ({
+        platform: link.platform,
+        url: link.url,
+        screenshot: null,
+        status: 'error' as const, // Placeholder - will be updated to 'success' or 'error' when screenshot completes
+      }));
+    
     let websiteScreenshot: string | null = null;
     
-    // Sort social links so Facebook executes before Instagram
-    // This ensures Facebook (typically more reliable) runs first
-    const sortedSocialLinks = [...socialLinks].sort((a, b) => {
-      // Facebook comes first (returns -1), Instagram second (returns 1)
-      if (a.platform === 'facebook' && b.platform === 'instagram') return -1;
-      if (a.platform === 'instagram' && b.platform === 'facebook') return 1;
-      return 0; // Keep original order for same platform or other platforms
-    });
-    
     const totalScreenshots = sortedSocialLinks.length + (websiteUrlToUse ? 1 : 0);
-    console.log(`[API] Preparing to capture ${totalScreenshots} screenshots sequentially (${sortedSocialLinks.length} social + ${websiteUrlToUse ? '1 website' : '0 websites'})`);
-    console.log(`[API] Screenshot order: ${sortedSocialLinks.map(l => l.platform).join(' -> ')}`);
+    console.log(`[API] Preparing to capture ${totalScreenshots} screenshots (${sortedSocialLinks.length} social in PARALLEL + ${websiteUrlToUse ? '1 website' : '0 websites'})`);
+    console.log(`[API] Social platforms: ${sortedSocialLinks.map(l => l.platform).join(', ')}`);
     
     // Initialize partial result for incremental updates
     const updatePartialResult = () => {
       if (scanId) {
+        // Include all social links (even if screenshot is null) so frontend knows what to expect
+        // Frontend will display screenshots as they become available
         const partialResult = {
           success: true,
           businessName,
           address,
-          socialLinks: [...socialScreenshots], // Copy current array
+          socialLinks: [...socialScreenshots], // Include all, even placeholders
           websiteUrl: websiteUrlToUse,
           websiteScreenshot,
           count: socialLinks.length,
@@ -1708,37 +1714,51 @@ export async function POST(request: NextRequest) {
         const cached = scraperCache.get(scanId);
         if (cached && cached.status === 'running') {
           scraperCache.set(scanId, { ...cached, partialResult });
-          console.log(`[API] Updated partial result - ${socialScreenshots.length} social screenshots ready`);
+          const completedCount = socialScreenshots.filter(s => s.screenshot !== null || s.status === 'error').length;
+          console.log(`[API] Updated partial result - ${completedCount}/${sortedSocialLinks.length} social screenshots ready`);
         }
       }
     };
     
-    // Capture social media screenshots one at a time
+    // Capture social media screenshots in PARALLEL
+    // Each screenshot updates partial result as soon as it completes, so frontend can display immediately
     // Pass business context to help with Google search bypass if Instagram blocks login
-    for (const link of sortedSocialLinks) {
-      console.log(`[API] Capturing screenshot for ${link.platform}: ${link.url}`);
+    const socialScreenshotPromises = sortedSocialLinks.map(async (link, index) => {
+      console.log(`[API] 🚀 Starting parallel screenshot capture for ${link.platform}: ${link.url}`);
       try {
         const result = await captureSocialScreenshot(link.platform, link.url, 'mobile', businessName, address);
         if ('platform' in result) {
-          console.log(`[API] Social screenshot for ${result.platform}: hasScreenshot=${!!result.screenshot}, status=${result.status}`);
-          socialScreenshots.push(result);
-          // Update partial result after each screenshot completes
+          console.log(`[API] ✅ Social screenshot for ${result.platform} completed: hasScreenshot=${!!result.screenshot}, status=${result.status}`);
+          
+          // Store result in the correct position to maintain order
+          socialScreenshots[index] = result;
+          
+          // Update partial result immediately so frontend can display this screenshot
           updatePartialResult();
         }
+        return { index, result, error: null };
       } catch (error) {
-        console.error(`[API] Screenshot capture for ${link.platform} FAILED:`, error);
-        socialScreenshots.push({
+        console.error(`[API] ❌ Screenshot capture for ${link.platform} FAILED:`, error);
+        const errorResult = {
           platform: link.platform,
           url: link.url,
           screenshot: null,
-          status: 'error',
-        });
+          status: 'error' as const,
+        };
+        
+        // Store error result in the correct position
+        socialScreenshots[index] = errorResult;
+        
         // Update partial result even on error
         updatePartialResult();
+        
+        return { index, result: null, error };
       }
-      // Small delay between captures to ensure Chromium binary is released
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+    });
+    
+    // Wait for all social screenshots to complete (they run in parallel)
+    await Promise.allSettled(socialScreenshotPromises);
+    console.log(`[API] ✅ All ${sortedSocialLinks.length} social screenshots completed (parallel execution)`);
 
     // Capture website screenshot
     if (websiteUrlToUse) {
