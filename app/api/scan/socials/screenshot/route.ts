@@ -696,15 +696,40 @@ async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promi
       // No inputs at all - Instagram might be blocking or page structure changed
       const pageContent = await page.content().catch(() => '');
       const bodyText = await page.locator('body').textContent().catch(() => '');
-      console.log(`[SCREENSHOT] ⚠️ No inputs found on page. Body text length: ${bodyText.length}, HTML length: ${pageContent.length}`);
+      const pageTitle = await page.title().catch(() => '');
+      console.log(`[SCREENSHOT] ⚠️ No inputs found on page. Body text length: ${bodyText.length}, HTML length: ${pageContent.length}, Title: "${pageTitle}"`);
       
-      // Wait a bit more in case it's still loading
-      await page.waitForTimeout(3000);
-      const inputsAfterWait = await page.locator('input').count();
-      console.log(`[SCREENSHOT] Inputs after additional wait: ${inputsAfterWait}`);
-      
-      if (inputsAfterWait === 0) {
-        throw new Error('Instagram login page has no input fields - page may be blocked or structure changed');
+      // Check if page is suspiciously empty (Instagram blocking automation)
+      if (pageContent.length < 500 || bodyText.length < 10) {
+        console.log(`[SCREENSHOT] ⚠️ Page appears to be empty/blocked by Instagram`);
+        
+        // Try to take a screenshot to see what Instagram is showing
+        const blockScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
+        
+        // Wait a bit more in case it's still loading
+        await page.waitForTimeout(3000);
+        const inputsAfterWait = await page.locator('input').count();
+        const contentAfterWait = await page.content().catch(() => '');
+        console.log(`[SCREENSHOT] After additional wait: ${inputsAfterWait} inputs, HTML length: ${contentAfterWait.length}`);
+        
+        if (inputsAfterWait === 0 && contentAfterWait.length < 500) {
+          // Definitely blocked - return error with screenshot
+          return {
+            status: 'login_failed',
+            pageState: 'LOGIN',
+            debugScreenshot: blockScreenshot,
+            error: 'Instagram is blocking automation - login page is empty. This may be due to bot detection. Consider using cookies/session management or manual login.'
+          };
+        }
+      } else {
+        // Page has content but no inputs - might be a different page structure
+        await page.waitForTimeout(3000);
+        const inputsAfterWait = await page.locator('input').count();
+        console.log(`[SCREENSHOT] Inputs after additional wait: ${inputsAfterWait}`);
+        
+        if (inputsAfterWait === 0) {
+          throw new Error('Instagram login page has no input fields - page structure may have changed');
+        }
       }
     }
     
