@@ -1761,186 +1761,128 @@ async function captureScreenshot(
               }
               
               console.log(`[SCREENSHOT] Extracted username: ${username}`);
-              console.log(`[SCREENSHOT] Navigating to Google to search for Instagram profile...`);
+              console.log(`[SCREENSHOT] Using Google CSE API to find Instagram profile...`);
               
               try {
-                // Build search query - use business context if available for better results
-                // Format: "[username] instagram" or "[businessName] [location] instagram"
-                let searchQueryText: string;
-                if (businessName && businessLocation) {
-                  searchQueryText = `${businessName} ${businessLocation} instagram`;
-                  console.log(`[SCREENSHOT] Using business context for search: ${searchQueryText}`);
-                } else if (businessName) {
-                  searchQueryText = `${businessName} instagram ${username}`;
-                  console.log(`[SCREENSHOT] Using business name for search: ${searchQueryText}`);
-                } else {
-                  // Simple search - just username + instagram (no site restriction)
-                  searchQueryText = `${username} instagram`;
-                  console.log(`[SCREENSHOT] Using simple username search: ${searchQueryText}`);
-                }
+                // Use Google Custom Search Engine API instead of Playwright-based search
+                // This avoids CAPTCHAs and rate limiting from Google
+                const apiKey = process.env.GOOGLE_CSE_API_KEY;
+                const cx = process.env.GOOGLE_CSE_CX;
                 
-                const searchQuery = encodeURIComponent(searchQueryText);
-                // Use Google.com with hl=en to force English and avoid consent issues
-                const googleUrl = `https://www.google.com/search?q=${searchQuery}&hl=en`;
-                console.log(`[SCREENSHOT] Navigating to Google: ${googleUrl}`);
-                
-                await page.goto(googleUrl, { 
-                  waitUntil: 'networkidle', 
-                  timeout: 20000 
-                }).catch(() => {
-                  console.log(`[SCREENSHOT] Google networkidle timeout, proceeding anyway`);
-                });
-                await page.waitForTimeout(3000);
-                
-                // Debug: Log page state
-                const googlePageUrl = page.url();
-                const googlePageTitle = await page.title();
-                const googleBodyLength = await page.evaluate(() => document.body?.textContent?.length || 0);
-                console.log(`[SCREENSHOT] Google page state - URL: ${googlePageUrl}, Title: ${googlePageTitle}, Body length: ${googleBodyLength}`);
-                
-                // Check if we're on a consent page
-                const isConsentPage = googlePageUrl.includes('consent.google') || googlePageTitle.includes('Before you continue');
-                if (isConsentPage) {
-                  console.log(`[SCREENSHOT] Detected Google consent page, attempting to bypass...`);
-                }
-                
-                // Try to dismiss Google consent/popup dialogs - more aggressive approach
-                try {
-                  // Multiple attempts to dismiss various Google popups
-                  const popupSelectors = [
-                    '#L2AGLb', // Google consent "I agree" button (most common)
-                    'button[id="L2AGLb"]',
-                    '[aria-label="Accept all"]',
-                    'button:has-text("Accept all")',
-                    'button:has-text("Reject all")',
-                    'button:has-text("I agree")',
-                    'button:has-text("Not now")',
-                    'g-raised-button:has-text("Not now")',
-                    '[role="button"]:has-text("Not now")',
-                    'form[action*="consent"] button',
-                    'div[role="dialog"] button',
-                  ];
-                  
-                  let popupDismissed = false;
-                  for (const selector of popupSelectors) {
-                    try {
-                      const btn = await page.$(selector);
-                      if (btn) {
-                        const isVisible = await btn.isVisible().catch(() => false);
-                        if (isVisible) {
-                          console.log(`[SCREENSHOT] Clicking Google popup button: ${selector}`);
-                          await btn.click();
-                          await page.waitForTimeout(2000);
-                          popupDismissed = true;
-                          break;
-                        }
-                      }
-                    } catch (e) {
-                      // Continue to next selector
-                    }
-                  }
-                  
-                  if (popupDismissed) {
-                    // Wait for search results to load after dismissing popup
-                    await page.waitForTimeout(2000);
-                  }
-                } catch (popupErr) {
-                  console.log(`[SCREENSHOT] Google popup handling error: ${popupErr}`);
-                }
-                
-                console.log(`[SCREENSHOT] Google search completed, looking for Instagram result...`);
-                
-                // Debug: Log all links on the page (check for any href)
-                const allLinksCount = await page.$$eval('a', links => links.length);
-                console.log(`[SCREENSHOT] Total links on page: ${allLinksCount}`);
-                
-                // Debug: Log all Instagram links
-                const allInstagramLinks = await page.$$eval('a[href*="instagram"]', links => 
-                  links.slice(0, 10).map(l => ({ href: l.getAttribute('href'), text: l.textContent?.slice(0, 50) }))
-                ).catch(() => []);
-                console.log(`[SCREENSHOT] Found ${allInstagramLinks.length} Instagram links on Google:`, JSON.stringify(allInstagramLinks));
-                
-                // Find Instagram result with multiple selector strategies
-                let instagramLink = null;
-                const linkSelectors = [
-                  `a[href*="instagram.com/${username}"]`,
-                  `a[href*="instagram.com"][href*="${username}"]`,
-                  'a[href*="instagram.com"]:not([href*="support"]):not([href*="help"]):not([href*="about"])',
-                ];
-                
-                for (const selector of linkSelectors) {
-                  try {
-                    instagramLink = await page.$(selector);
-                    if (instagramLink) {
-                      const href = await instagramLink.getAttribute('href');
-                      console.log(`[SCREENSHOT] Found Instagram link with selector "${selector}": ${href}`);
-                      break;
-                    }
-                  } catch (e) {
-                    console.log(`[SCREENSHOT] Selector "${selector}" failed: ${e}`);
-                  }
-                }
-                
-                if (!instagramLink) {
-                  // Last resort: try clicking the first search result that mentions instagram
-                  console.log(`[SCREENSHOT] Trying fallback: searching all links with data-ved...`);
-                  try {
-                    const searchResults = await page.$$('a[data-ved], div.g a, a[ping]');
-                    console.log(`[SCREENSHOT] Found ${searchResults.length} search result links`);
-                    for (const result of searchResults) {
-                      const href = await result.getAttribute('href');
-                      if (href && href.includes('instagram.com') && !href.includes('support') && !href.includes('help')) {
-                        instagramLink = result;
-                        console.log(`[SCREENSHOT] Found Instagram link via search results: ${href}`);
-                        break;
-                      }
-                    }
-                  } catch (e) {
-                    console.log(`[SCREENSHOT] Fallback search failed: ${e}`);
-                  }
-                }
-                
-                if (!instagramLink) {
-                  // Take a debug screenshot to see what Google is showing
-                  const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
-                  console.log(`[SCREENSHOT] No Instagram link found. Page HTML length: ${await page.evaluate(() => document.documentElement.outerHTML.length)}`);
-                  console.log(`[SCREENSHOT] No Instagram link found in Google results after all attempts`);
+                if (!apiKey || !cx) {
+                  console.log(`[SCREENSHOT] Google CSE API not configured (missing GOOGLE_CSE_API_KEY or GOOGLE_CSE_CX)`);
                   return {
                     success: false,
-                    error: `Instagram is blocking automation. Could not find profile via Google search. Google may be showing consent page or no results.`,
-                    screenshot: debugScreenshot
+                    error: `Instagram is blocking automation and Google CSE API is not configured. Cannot find profile.`,
+                    screenshot: loginResult.debugScreenshot
                   };
                 }
                 
-                console.log(`[SCREENSHOT] Found Instagram link in Google results, clicking...`);
-                await instagramLink.click();
-                await page.waitForTimeout(5000); // Wait for Instagram to load
+                // Build search query - use site restriction for accurate results
+                const searchQuery = `site:instagram.com "${username}"`;
+                console.log(`[SCREENSHOT] Google CSE search query: ${searchQuery}`);
+                
+                // Call Google CSE API
+                const cseUrl = new URL('https://www.googleapis.com/customsearch/v1');
+                cseUrl.searchParams.set('key', apiKey);
+                cseUrl.searchParams.set('cx', cx);
+                cseUrl.searchParams.set('q', searchQuery);
+                cseUrl.searchParams.set('num', '5');
+                
+                const cseResponse = await fetch(cseUrl.toString(), {
+                  headers: { 'Accept': 'application/json' },
+                });
+                
+                if (!cseResponse.ok) {
+                  const errorText = await cseResponse.text().catch(() => 'Unknown error');
+                  console.log(`[SCREENSHOT] Google CSE API error ${cseResponse.status}: ${errorText.slice(0, 200)}`);
+                  return {
+                    success: false,
+                    error: `Instagram is blocking automation. Google CSE API returned ${cseResponse.status}.`,
+                    screenshot: loginResult.debugScreenshot
+                  };
+                }
+                
+                const cseData = await cseResponse.json();
+                const cseItems = cseData.items || [];
+                console.log(`[SCREENSHOT] Google CSE returned ${cseItems.length} results`);
+                
+                // Find the best matching Instagram profile URL
+                let instagramProfileUrl: string | null = null;
+                for (const item of cseItems) {
+                  const link = item.link || '';
+                  // Check if it's a profile URL (not a post, reel, etc.)
+                  if (link.includes('instagram.com/') && 
+                      !link.includes('/p/') && 
+                      !link.includes('/reel/') && 
+                      !link.includes('/stories/') &&
+                      !link.includes('/explore/') &&
+                      !link.includes('help.instagram.com')) {
+                    // Check if username matches
+                    const urlMatch = link.match(/instagram\.com\/([^\/\?]+)/);
+                    if (urlMatch && urlMatch[1].toLowerCase() === username.toLowerCase()) {
+                      instagramProfileUrl = link;
+                      console.log(`[SCREENSHOT] Found exact username match: ${link}`);
+                      break;
+                    }
+                  }
+                }
+                
+                // If no exact match, try broader matching
+                if (!instagramProfileUrl) {
+                  for (const item of cseItems) {
+                    const link = item.link || '';
+                    if (link.includes(`instagram.com/${username}`) || 
+                        link.toLowerCase().includes(`instagram.com/${username.toLowerCase()}`)) {
+                      instagramProfileUrl = link;
+                      console.log(`[SCREENSHOT] Found partial username match: ${link}`);
+                      break;
+                    }
+                  }
+                }
+                
+                if (!instagramProfileUrl) {
+                  console.log(`[SCREENSHOT] No Instagram profile URL found in CSE results`);
+                  console.log(`[SCREENSHOT] CSE results:`, JSON.stringify(cseItems.slice(0, 3).map((i: { link?: string; title?: string }) => ({ link: i.link, title: i.title }))));
+                  return {
+                    success: false,
+                    error: `Instagram is blocking automation. Could not find profile via Google CSE API.`,
+                    screenshot: loginResult.debugScreenshot
+                  };
+                }
+                
+                console.log(`[SCREENSHOT] Found Instagram profile via CSE: ${instagramProfileUrl}`);
+                console.log(`[SCREENSHOT] Navigating directly to profile...`);
+                
+                // Navigate directly to the Instagram profile URL
+                await page.goto(instagramProfileUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.waitForTimeout(3000);
                 
                 const fallbackUrl = page.url();
                 const fallbackState = classifyInstagramPageState(fallbackUrl);
-                console.log(`[SCREENSHOT] After Google bypass - URL: ${fallbackUrl}, State: ${fallbackState}`);
+                console.log(`[SCREENSHOT] After CSE navigation - URL: ${fallbackUrl}, State: ${fallbackState}`);
                 
                 // If we reached the profile or unknown state, continue
                 if (fallbackState === 'PROFILE' || fallbackState === 'UNKNOWN') {
-                  console.log(`[SCREENSHOT] ✅ Google bypass successful! Proceeding with screenshot...`);
+                  console.log(`[SCREENSHOT] ✅ Google CSE bypass successful! Proceeding with screenshot...`);
                   pageState = fallbackState;
                   
-                  // Remove Instagram overlays that appear after Google navigation
+                  // Remove Instagram overlays
                   await removeInstagramOverlaysViaGoogle(page);
                 } else {
-                  // Still on login/challenge - can't proceed
-                  console.log(`[SCREENSHOT] Google bypass failed - still on ${fallbackState}`);
+                  // Still on login/challenge - Instagram is blocking this profile
+                  console.log(`[SCREENSHOT] CSE bypass failed - Instagram still blocking. State: ${fallbackState}`);
                   return {
                     success: false,
-                    error: `Instagram is blocking automation even via Google. State: ${fallbackState}`,
+                    error: `Instagram is blocking access to this profile. State: ${fallbackState}`,
                     screenshot: await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined)
                   };
                 }
-              } catch (googleErr) {
-                console.log(`[SCREENSHOT] Google bypass failed: ${googleErr}`);
+              } catch (cseErr) {
+                console.log(`[SCREENSHOT] Google CSE bypass failed: ${cseErr}`);
                 return {
                   success: false,
-                  error: `Instagram login failed and Google bypass also failed. Original error: ${loginResult.error}`,
+                  error: `Instagram login failed and Google CSE bypass also failed. ${loginResult.error}`,
                   screenshot: loginResult.debugScreenshot
                 };
               }
