@@ -1775,6 +1775,9 @@ async function captureScreenshot(
         console.log(`[SCREENSHOT] 🔄 Initial state: ${pageState}`);
         await logPageElements(page, `Initial state: ${pageState}`);
         
+        // Track if we successfully bypassed via CSE (to skip re-navigation later)
+        let cseBypassSuccessful = false;
+        
         // Handle login if needed
         if (pageState === 'LOGIN' || pageState === 'CHALLENGE') {
           const loginResult = await handleInstagramLogin(page, normalizedUrl);
@@ -1882,15 +1885,51 @@ async function captureScreenshot(
                   }
                 }
                 
-                // If no exact match, try broader matching
+                // If no exact match, try broader matching but still filter out non-profile URLs
                 if (!instagramProfileUrl) {
                   for (const item of cseItems) {
                     const link = item.link || '';
+                    // Check if URL contains our username
                     if (link.includes(`instagram.com/${username}`) || 
                         link.toLowerCase().includes(`instagram.com/${username.toLowerCase()}`)) {
-                      instagramProfileUrl = link;
-                      console.log(`[SCREENSHOT] Found partial username match: ${link}`);
-                      break;
+                      
+                      // If it's a profile URL (not a post/reel), use it directly
+                      if (!link.includes('/p/') && 
+                          !link.includes('/reel/') && 
+                          !link.includes('/stories/') &&
+                          !link.includes('/explore/')) {
+                        instagramProfileUrl = link;
+                        console.log(`[SCREENSHOT] Found partial username match (profile URL): ${link}`);
+                        break;
+                      } else {
+                        // It's a post/reel URL - extract username and construct profile URL
+                        const urlMatch = link.match(/instagram\.com\/([^\/\?]+)/);
+                        if (urlMatch && urlMatch[1]) {
+                          const extractedUsername = urlMatch[1];
+                          instagramProfileUrl = `https://www.instagram.com/${extractedUsername}/`;
+                          console.log(`[SCREENSHOT] Found post/reel URL, extracted profile: ${instagramProfileUrl} (from: ${link})`);
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }
+                
+                // If still no match, check if ANY Instagram result contains our username and extract profile
+                if (!instagramProfileUrl) {
+                  for (const item of cseItems) {
+                    const link = item.link || '';
+                    // Try to extract username from any Instagram URL
+                    const urlMatch = link.match(/instagram\.com\/([^\/\?]+)/);
+                    if (urlMatch && urlMatch[1]) {
+                      const extractedUsername = urlMatch[1].toLowerCase();
+                      if (extractedUsername === username.toLowerCase() ||
+                          extractedUsername.includes(username.toLowerCase()) ||
+                          username.toLowerCase().includes(extractedUsername)) {
+                        instagramProfileUrl = `https://www.instagram.com/${urlMatch[1]}/`;
+                        console.log(`[SCREENSHOT] Extracted profile from result: ${instagramProfileUrl} (from: ${link})`);
+                        break;
+                      }
                     }
                   }
                 }
@@ -1920,6 +1959,7 @@ async function captureScreenshot(
                 if (fallbackState === 'PROFILE' || fallbackState === 'UNKNOWN') {
                   console.log(`[SCREENSHOT] ✅ Google CSE bypass successful! Proceeding with screenshot...`);
                   pageState = fallbackState;
+                  cseBypassSuccessful = true; // Mark CSE bypass as successful to skip re-navigation later
                   
                   // Remove Instagram overlays
                   await removeInstagramOverlaysViaGoogle(page);
@@ -1958,7 +1998,8 @@ async function captureScreenshot(
         console.log(`[SCREENSHOT] 🔄 Pre-screenshot URL: ${currentUrl}`);
         console.log(`[SCREENSHOT] 🔄 Pre-screenshot state: ${pageState}`);
         
-        if (pageState !== 'PROFILE') {
+        // Skip re-navigation if CSE bypass was successful - we're already on the best URL we can get
+        if (pageState !== 'PROFILE' && !cseBypassSuccessful) {
           console.log(`[SCREENSHOT] ⚠️ Not on PROFILE page (state: ${pageState}), attempting direct navigation...`);
           
           // Try one more time to navigate to profile
@@ -1984,6 +2025,9 @@ async function captureScreenshot(
           if (pageState === 'UNKNOWN') {
             console.log(`[SCREENSHOT] ⚠️ UNKNOWN state - attempting screenshot anyway (may show limited content)`);
           }
+        } else if (cseBypassSuccessful && pageState !== 'PROFILE') {
+          // CSE bypass was successful but we're in UNKNOWN state - that's okay, proceed with screenshot
+          console.log(`[SCREENSHOT] ✅ CSE bypass active - skipping re-navigation, proceeding with ${pageState} state`);
         }
         
         // Proceed with screenshot preparation (PROFILE or UNKNOWN state)
