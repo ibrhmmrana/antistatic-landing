@@ -918,7 +918,57 @@ async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promi
     }
     
     if (pageState === 'LOGIN') {
-      console.log(`[SCREENSHOT] ⚠️ Still on LOGIN page - credentials may be incorrect`);
+      console.log(`[SCREENSHOT] ⚠️ Still on LOGIN page - checking for error dialogs...`);
+      
+      // Check for error dialog (Instagram shows "OK" button when there's an error)
+      const errorDialogSelectors = [
+        'div[role="button"]:has-text("OK")',
+        'button:has-text("OK")',
+        'div[role="dialog"] div[role="button"]',
+        'div:text-is("OK")',
+      ];
+      
+      let foundErrorDialog = false;
+      for (const selector of errorDialogSelectors) {
+        try {
+          const okButton = page.locator(selector).first();
+          if (await okButton.isVisible({ timeout: 2000 })) {
+            console.log(`[SCREENSHOT] Found error dialog with OK button, dismissing...`);
+            await okButton.click();
+            await page.waitForTimeout(1000);
+            foundErrorDialog = true;
+            break;
+          }
+        } catch (e) {
+          // Continue to next selector
+        }
+      }
+      
+      if (foundErrorDialog) {
+        // Check if there's an error message visible
+        const errorMessageSelectors = [
+          'div[role="alert"]',
+          'span:has-text("incorrect")',
+          'span:has-text("wrong")',
+          'div:has-text("Sorry, your password was incorrect")',
+          'div:has-text("The username you entered")',
+        ];
+        
+        for (const selector of errorMessageSelectors) {
+          try {
+            const errorEl = page.locator(selector).first();
+            if (await errorEl.isVisible({ timeout: 1000 })) {
+              const errorText = await errorEl.textContent();
+              console.log(`[SCREENSHOT] ❌ Login error message: ${errorText?.slice(0, 100)}`);
+              break;
+            }
+          } catch (e) {
+            // Continue
+          }
+        }
+      }
+      
+      console.log(`[SCREENSHOT] ⚠️ Credentials may be incorrect or account is rate-limited`);
       const debugScreenshot = await page.screenshot({ fullPage: false }).then(b => b.toString('base64')).catch(() => undefined);
       return { 
         status: 'login_failed', 
@@ -1978,6 +2028,18 @@ async function captureScreenshot(
                 }
                 
                 console.log(`[SCREENSHOT] Found Instagram profile via CSE: ${instagramProfileUrl}`);
+                console.log(`[SCREENSHOT] Clearing cookies before CSE navigation to avoid tainted session...`);
+                
+                // Clear cookies to remove the "tainted" session from failed login
+                // This gives us a fresh start for navigating to the profile
+                try {
+                  const context = page.context();
+                  await context.clearCookies();
+                  console.log(`[SCREENSHOT] ✅ Cookies cleared`);
+                } catch (clearErr) {
+                  console.log(`[SCREENSHOT] ⚠️ Could not clear cookies: ${clearErr}`);
+                }
+                
                 console.log(`[SCREENSHOT] Navigating directly to profile...`);
                 
                 // Navigate directly to the Instagram profile URL
