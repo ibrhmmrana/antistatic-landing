@@ -403,12 +403,15 @@ interface InstagramLoginResult {
 function classifyInstagramPageState(url: string, targetUsername?: string): InstagramPageState {
   const lowerUrl = url.toLowerCase();
   
-  // Challenge/verification pages
+  // Challenge/verification pages (including 2FA code entry)
   if (lowerUrl.includes('/challenge') || 
       lowerUrl.includes('/checkpoint') || 
       lowerUrl.includes('/two_factor') ||
       lowerUrl.includes('/accounts/suspended') ||
-      lowerUrl.includes('/accounts/onetap')) {
+      lowerUrl.includes('/accounts/onetap') ||
+      lowerUrl.includes('/auth_platform/codeentry') ||
+      lowerUrl.includes('/auth_platform/') ||
+      lowerUrl.includes('codeentry')) {
     return 'CHALLENGE';
   }
   
@@ -963,26 +966,58 @@ async function handleInstagramLogin(page: Page, targetProfileUrl: string): Promi
 }
 
 /**
- * Dismisses Instagram popups like "Save Login Info" or "Turn on Notifications"
+ * Dismisses Instagram popups like "Save Login Info", "Turn on Notifications", or "Suspicious Activity"
  */
 async function dismissInstagramPopups(page: Page): Promise<void> {
   console.log(`[SCREENSHOT] Looking for Instagram popups to dismiss...`);
   
-  for (let i = 0; i < 3; i++) {
-    try {
-      const notNowButton = page.locator('div[role="button"]:has-text("Not now"), button:has-text("Not Now"), button:has-text("Not now")').first();
-      if (await notNowButton.isVisible({ timeout: 2000 })) {
-        console.log(`[SCREENSHOT] Found "Not now" popup #${i + 1}, clicking...`);
-        await notNowButton.click();
-        await page.waitForTimeout(1000);
-      } else {
-        break;
+  // List of popup button selectors to try (in order)
+  const popupButtonSelectors = [
+    // Suspicious activity "Close" button
+    'div[role="button"]:has-text("Close")',
+    'button:has-text("Close")',
+    // Save login info "Not now" button (various formats)
+    'div[role="button"]:has-text("Not now")',
+    'button:has-text("Not Now")',
+    'button:has-text("Not now")',
+    'span:has-text("Not now")',
+    // Turn on notifications
+    'button:has-text("Not Now")',
+    // Generic dismiss buttons
+    'div[role="button"][tabindex="0"]:has-text("Close")',
+    'div[role="button"][tabindex="0"]:has-text("Not now")',
+  ];
+  
+  let dismissedCount = 0;
+  
+  // Try each selector multiple times (popups can appear in sequence)
+  for (let round = 0; round < 5; round++) {
+    let foundPopup = false;
+    
+    for (const selector of popupButtonSelectors) {
+      try {
+        const button = page.locator(selector).first();
+        if (await button.isVisible({ timeout: 1000 })) {
+          const buttonText = await button.textContent().catch(() => 'unknown');
+          console.log(`[SCREENSHOT] Found popup button "${buttonText?.slice(0, 20)}", clicking...`);
+          await button.click();
+          await page.waitForTimeout(1500);
+          dismissedCount++;
+          foundPopup = true;
+          break; // Go to next round
+        }
+      } catch (e) {
+        // Selector not found or not visible, continue
       }
-    } catch (e) {
+    }
+    
+    if (!foundPopup) {
+      // No more popups found
       break;
     }
   }
-  console.log(`[SCREENSHOT] Popup dismissal complete`);
+  
+  console.log(`[SCREENSHOT] Popup dismissal complete (dismissed ${dismissedCount} popups)`);
 }
 
 /**
