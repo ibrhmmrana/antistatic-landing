@@ -1215,8 +1215,14 @@ function normalizeFacebookUrl(url: string): string | null {
   try {
     const urlObj = new URL(url);
     
+    // CRITICAL: Only accept facebook.com domains
+    const hostname = urlObj.hostname.toLowerCase();
+    if (!hostname.includes('facebook.com')) {
+      return null;
+    }
+    
     // Convert m.facebook.com to www.facebook.com
-    if (urlObj.hostname === 'm.facebook.com') {
+    if (hostname === 'm.facebook.com') {
       urlObj.hostname = 'www.facebook.com';
     }
     
@@ -1230,12 +1236,21 @@ function normalizeFacebookUrl(url: string): string | null {
     const rejectedPatterns = [
       '/groups/',
       '/photo.php',
+      '/photos/',
       '/posts/',
       '/reel/',
       '/watch/',
       '/events/',
       '/marketplace/',
       '/share/',
+      '/sharer/',
+      '/sharer.php',
+      '/story.php',
+      '/hashtag/',
+      '/help/',
+      '/policies/',
+      '/login',
+      '/recover/',
     ];
     
     for (const pattern of rejectedPatterns) {
@@ -1246,6 +1261,11 @@ function normalizeFacebookUrl(url: string): string | null {
     
     // Reject if it has fbid in query (photo/post links)
     if (url.toLowerCase().includes('fbid=')) {
+      return null;
+    }
+    
+    // Reject root facebook.com with no page
+    if (pathname === '/' || pathname === '') {
       return null;
     }
     
@@ -1357,12 +1377,14 @@ function scoreSearchResult(
  * This approach avoids CAPTCHAs by using Google's official API instead of scraping.
  * 
  * @param businessName - The name of the business
- * @param address - The full address of the business
+ * @param address - The full address of the business (can be partial, e.g., just city)
+ * @param platformsToSearch - Optional array of platforms to search for. If not provided, searches for both.
  * @returns Promise resolving to an object with social media links
  */
 async function extractSocialLinksViaGoogleCse(
   businessName: string,
-  address: string
+  address: string,
+  platformsToSearch?: SocialPlatform[]
 ): Promise<{ socialLinks: SocialLink[] }> {
   const apiKey = process.env.GOOGLE_CSE_API_KEY;
   const cx = process.env.GOOGLE_CSE_CX;
@@ -1372,82 +1394,119 @@ async function extractSocialLinksViaGoogleCse(
     return { socialLinks: [] };
   }
   
-  console.log(`[SOCIAL EXTRACTOR] Using Google CSE API to search for social profiles`);
+  // Default to both platforms if not specified
+  const platforms = platformsToSearch || ['facebook', 'instagram'];
+  console.log(`[SOCIAL EXTRACTOR] Using Google CSE API to search for: ${platforms.join(', ')}`);
   
   const socialLinks: SocialLink[] = [];
   const seenUrls = new Set<string>();
   
-  // Build search queries for each platform
-  const searchQueries = {
-    facebook: [
-      `facebook ${businessName} ${address}`,
-      `site:facebook.com ${businessName} ${address}`,
-    ],
-    instagram: [
-      `instagram ${businessName} ${address}`,
-      `site:instagram.com ${businessName} ${address}`,
-    ],
-  };
+  // Extract just the city/area from the address for more focused searches
+  // Full addresses often return too many unrelated results
+  const addressParts = address.split(',').map(p => p.trim());
+  const shortAddress = addressParts.length > 2 
+    ? addressParts.slice(-2).join(', ')  // Last 2 parts (usually city, country)
+    : address;
   
-  // Search for Facebook profiles
-  const facebookCandidates: Array<{ url: string; score: number }> = [];
-  for (const query of searchQueries.facebook) {
-    console.log(`[SOCIAL EXTRACTOR] Searching Facebook: "${query}"`);
-    const items = await googleCseSearch(query, 5);
+  // Minimum score threshold - candidates below this are rejected
+  const MIN_SCORE_THRESHOLD = 3;
+  
+  // Search for Facebook profiles (if requested)
+  if (platforms.includes('facebook')) {
+    const facebookCandidates: Array<{ url: string; score: number }> = [];
     
-    for (const item of items) {
-      if (!item.link) continue;
+    // Use site: restriction as primary query for accurate results
+    const facebookQueries = [
+      `site:facebook.com "${businessName}" ${shortAddress}`,
+      `site:facebook.com ${businessName}`,
+    ];
+    
+    for (const query of facebookQueries) {
+      console.log(`[SOCIAL EXTRACTOR] Searching Facebook: "${query}"`);
+      const items = await googleCseSearch(query, 5);
       
-      const normalized = normalizeFacebookUrl(item.link);
-      if (!normalized || seenUrls.has(normalized)) continue;
+      for (const item of items) {
+        if (!item.link) continue;
+        
+        const normalized = normalizeFacebookUrl(item.link);
+        if (!normalized || seenUrls.has(normalized)) continue;
+        
+        seenUrls.add(normalized);
+        const score = scoreSearchResult(item, businessName, 'facebook');
+        
+        // Only accept candidates with minimum score
+        if (score >= MIN_SCORE_THRESHOLD) {
+          facebookCandidates.push({ url: normalized, score });
+          console.log(`[SOCIAL EXTRACTOR] Facebook candidate: ${normalized} (score: ${score})`);
+        } else {
+          console.log(`[SOCIAL EXTRACTOR] Rejected Facebook (low score ${score}): ${normalized}`);
+        }
+      }
       
-      seenUrls.add(normalized);
-      const score = scoreSearchResult(item, businessName, 'facebook');
-      facebookCandidates.push({ url: normalized, score });
-      console.log(`[SOCIAL EXTRACTOR] Facebook candidate: ${normalized} (score: ${score})`);
+      // If we found good candidates, no need to continue
+      if (facebookCandidates.length > 0) break;
+      
+      // Small delay between queries
+      await randomDelay(200, 400);
     }
     
-    // Small delay between queries to be respectful
-    await randomDelay(200, 400);
+    // Select best candidate (highest score)
+    if (facebookCandidates.length > 0) {
+      const bestFacebook = facebookCandidates.reduce((best, current) => 
+        current.score > best.score ? current : best
+      );
+      socialLinks.push({ platform: 'facebook', url: bestFacebook.url });
+      console.log(`[SOCIAL EXTRACTOR] Selected Facebook: ${bestFacebook.url} (score: ${bestFacebook.score})`);
+    }
   }
   
-  // Search for Instagram profiles
-  const instagramCandidates: Array<{ url: string; score: number }> = [];
-  for (const query of searchQueries.instagram) {
-    console.log(`[SOCIAL EXTRACTOR] Searching Instagram: "${query}"`);
-    const items = await googleCseSearch(query, 5);
+  // Search for Instagram profiles (if requested)
+  if (platforms.includes('instagram')) {
+    const instagramCandidates: Array<{ url: string; score: number }> = [];
     
-    for (const item of items) {
-      if (!item.link) continue;
+    // Use site: restriction as primary query for accurate results
+    const instagramQueries = [
+      `site:instagram.com "${businessName}" ${shortAddress}`,
+      `site:instagram.com ${businessName}`,
+    ];
+    
+    for (const query of instagramQueries) {
+      console.log(`[SOCIAL EXTRACTOR] Searching Instagram: "${query}"`);
+      const items = await googleCseSearch(query, 5);
       
-      const normalized = normalizeInstagramUrl(item.link);
-      if (!normalized || seenUrls.has(normalized)) continue;
+      for (const item of items) {
+        if (!item.link) continue;
+        
+        const normalized = normalizeInstagramUrl(item.link);
+        if (!normalized || seenUrls.has(normalized)) continue;
+        
+        seenUrls.add(normalized);
+        const score = scoreSearchResult(item, businessName, 'instagram');
+        
+        // Only accept candidates with minimum score
+        if (score >= MIN_SCORE_THRESHOLD) {
+          instagramCandidates.push({ url: normalized, score });
+          console.log(`[SOCIAL EXTRACTOR] Instagram candidate: ${normalized} (score: ${score})`);
+        } else {
+          console.log(`[SOCIAL EXTRACTOR] Rejected Instagram (low score ${score}): ${normalized}`);
+        }
+      }
       
-      seenUrls.add(normalized);
-      const score = scoreSearchResult(item, businessName, 'instagram');
-      instagramCandidates.push({ url: normalized, score });
-      console.log(`[SOCIAL EXTRACTOR] Instagram candidate: ${normalized} (score: ${score})`);
+      // If we found good candidates, no need to continue
+      if (instagramCandidates.length > 0) break;
+      
+      // Small delay between queries
+      await randomDelay(200, 400);
     }
     
-    // Small delay between queries
-    await randomDelay(200, 400);
-  }
-  
-  // Select best candidate for each platform (highest score)
-  if (facebookCandidates.length > 0) {
-    const bestFacebook = facebookCandidates.reduce((best, current) => 
-      current.score > best.score ? current : best
-    );
-    socialLinks.push({ platform: 'facebook', url: bestFacebook.url });
-    console.log(`[SOCIAL EXTRACTOR] Selected Facebook: ${bestFacebook.url} (score: ${bestFacebook.score})`);
-  }
-  
-  if (instagramCandidates.length > 0) {
-    const bestInstagram = instagramCandidates.reduce((best, current) => 
-      current.score > best.score ? current : best
-    );
-    socialLinks.push({ platform: 'instagram', url: bestInstagram.url });
-    console.log(`[SOCIAL EXTRACTOR] Selected Instagram: ${bestInstagram.url} (score: ${bestInstagram.score})`);
+    // Select best candidate (highest score)
+    if (instagramCandidates.length > 0) {
+      const bestInstagram = instagramCandidates.reduce((best, current) => 
+        current.score > best.score ? current : best
+      );
+      socialLinks.push({ platform: 'instagram', url: bestInstagram.url });
+      console.log(`[SOCIAL EXTRACTOR] Selected Instagram: ${bestInstagram.url} (score: ${bestInstagram.score})`);
+    }
   }
   
   console.log(`[SOCIAL EXTRACTOR] Google CSE API found ${socialLinks.length} social links`);
@@ -1519,33 +1578,71 @@ export async function POST(request: NextRequest) {
 
     // Create the scraper execution promise
     const scraperPromise = (async () => {
-      // APPROACH 1: Use Google Custom Search API (official, no CAPTCHAs)
-      // APPROACH 2: Fall back to scraping the business website directly if API returns nothing
+      // APPROACH: 
+      // 1. First try to extract social links from the business website (fastest, most reliable)
+      // 2. If any platforms are missing, use Google CSE API to find them
       
       console.log(`[API] Extracting social links for: "${businessName}" at "${address}"`);
       
-      // Try Google Custom Search API first (avoids CAPTCHAs)
-      const cseResult = await extractSocialLinksViaGoogleCse(businessName, address);
-      let socialLinks = cleanAndDeduplicateSocialLinks(cseResult.socialLinks);
-      console.log(`[API] Found ${socialLinks.length} social links from Google CSE API`);
-      
-      // Use provided website URL (we don't get it from CSE API)
+      // Use provided website URL
       const websiteUrlToUse = providedWebsiteUrl || null;
-      console.log(`[API] Website URL: ${websiteUrlToUse || 'none'} (provided: ${providedWebsiteUrl || 'none'})`);
+      console.log(`[API] Website URL: ${websiteUrlToUse || 'none'}`);
       
-      // FALLBACK: If API returned no social links and we have a website URL, try scraping the website directly
-      // This provides a backup method if the API doesn't find the profiles
-      if (socialLinks.length === 0 && websiteUrlToUse) {
-        console.log(`[API] Google CSE API returned no social links. Falling back to website scraping: ${websiteUrlToUse}`);
+      let socialLinks: { platform: string; url: string }[] = [];
+      
+      // STEP 1: Try to extract social links from the business website first
+      if (websiteUrlToUse) {
+        console.log(`[API] Step 1: Extracting social links from website: ${websiteUrlToUse}`);
         try {
           const websiteLinks = await extractSocialLinksFromWebsite(websiteUrlToUse);
           socialLinks = cleanAndDeduplicateSocialLinks(websiteLinks);
-          console.log(`[API] Found ${socialLinks.length} social links from website fallback`);
+          console.log(`[API] Found ${socialLinks.length} social links from website`);
+          
+          // Log which platforms we found
+          const foundPlatforms = socialLinks.map(l => l.platform);
+          console.log(`[API] Platforms found on website: ${foundPlatforms.join(', ') || 'none'}`);
         } catch (websiteError) {
-          console.error(`[API] Website fallback also failed:`, websiteError);
-          // Continue with empty social links - at least we'll capture the website screenshot
+          console.error(`[API] Website scraping failed:`, websiteError);
         }
+      } else {
+        console.log(`[API] Step 1: Skipped (no website URL provided)`);
       }
+      
+      // STEP 2: Identify missing platforms
+      const foundPlatforms = new Set(socialLinks.map(l => l.platform));
+      const missingPlatforms: SocialPlatform[] = [];
+      
+      if (!foundPlatforms.has('facebook')) {
+        missingPlatforms.push('facebook');
+      }
+      if (!foundPlatforms.has('instagram')) {
+        missingPlatforms.push('instagram');
+      }
+      
+      // STEP 3: Use Google CSE API to find missing platforms
+      if (missingPlatforms.length > 0) {
+        console.log(`[API] Step 2: Using Google CSE API to find missing platforms: ${missingPlatforms.join(', ')}`);
+        try {
+          const cseResult = await extractSocialLinksViaGoogleCse(businessName, address, missingPlatforms);
+          const cseLinks = cleanAndDeduplicateSocialLinks(cseResult.socialLinks);
+          console.log(`[API] Found ${cseLinks.length} additional social links from Google CSE API`);
+          
+          // Merge with existing links (website links take priority)
+          for (const link of cseLinks) {
+            if (!foundPlatforms.has(link.platform)) {
+              socialLinks.push(link);
+              foundPlatforms.add(link.platform);
+              console.log(`[API] Added from Google CSE: ${link.platform} -> ${link.url}`);
+            }
+          }
+        } catch (cseError) {
+          console.error(`[API] Google CSE API failed:`, cseError);
+        }
+      } else {
+        console.log(`[API] Step 2: Skipped (all platforms found on website)`);
+      }
+      
+      console.log(`[API] Final social links count: ${socialLinks.length}`);
 
     // Capture screenshots SEQUENTIALLY to avoid ETXTBSY error
     // (Multiple parallel Chromium launches conflict over /tmp/chromium binary)
