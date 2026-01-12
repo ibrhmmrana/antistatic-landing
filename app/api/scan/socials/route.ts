@@ -1652,12 +1652,22 @@ export async function POST(request: NextRequest) {
     const socialScreenshots: Array<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' }> = [];
     let websiteScreenshot: string | null = null;
     
-    const totalScreenshots = socialLinks.length + (websiteUrlToUse ? 1 : 0);
-    console.log(`[API] Preparing to capture ${totalScreenshots} screenshots sequentially (${socialLinks.length} social + ${websiteUrlToUse ? '1 website' : '0 websites'})`);
+    // Sort social links so Facebook executes before Instagram
+    // This ensures Facebook (typically more reliable) runs first
+    const sortedSocialLinks = [...socialLinks].sort((a, b) => {
+      // Facebook comes first (returns -1), Instagram second (returns 1)
+      if (a.platform === 'facebook' && b.platform === 'instagram') return -1;
+      if (a.platform === 'instagram' && b.platform === 'facebook') return 1;
+      return 0; // Keep original order for same platform or other platforms
+    });
+    
+    const totalScreenshots = sortedSocialLinks.length + (websiteUrlToUse ? 1 : 0);
+    console.log(`[API] Preparing to capture ${totalScreenshots} screenshots sequentially (${sortedSocialLinks.length} social + ${websiteUrlToUse ? '1 website' : '0 websites'})`);
+    console.log(`[API] Screenshot order: ${sortedSocialLinks.map(l => l.platform).join(' -> ')}`);
     
     // Capture social media screenshots one at a time
     // Pass business context to help with Google search bypass if Instagram blocks login
-    for (const link of socialLinks) {
+    for (const link of sortedSocialLinks) {
       console.log(`[API] Capturing screenshot for ${link.platform}: ${link.url}`);
       try {
         const result = await captureSocialScreenshot(link.platform, link.url, 'mobile', businessName, address);
