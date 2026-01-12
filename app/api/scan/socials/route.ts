@@ -1195,9 +1195,8 @@ export async function POST(request: NextRequest) {
 
     // Create the scraper execution promise
     const scraperPromise = (async () => {
-      // APPROACH: Extract social links from Google Business Profile (GBP)
-      // Navigates directly to Google search results URL to reduce CAPTCHA risk
-      // Uses stealth techniques to mimic real browser behavior
+      // APPROACH 1: Try to extract social links from Google Business Profile (GBP)
+      // APPROACH 2: Fall back to scraping the business website directly if GBP fails
       
       console.log(`[API] Extracting social links from GBP for: "${businessName}" at "${address}"`);
       
@@ -1209,6 +1208,20 @@ export async function POST(request: NextRequest) {
       // Use website URL from GBP if found, otherwise fall back to provided URL
       const websiteUrlToUse = gbpResult.websiteUrl || providedWebsiteUrl || null;
       console.log(`[API] Website URL: ${websiteUrlToUse || 'none'} (GBP: ${gbpResult.websiteUrl || 'none'}, provided: ${providedWebsiteUrl || 'none'})`);
+      
+      // FALLBACK: If GBP returned no social links and we have a website URL, try scraping the website directly
+      // This bypasses Google entirely and avoids CAPTCHA issues
+      if (socialLinks.length === 0 && websiteUrlToUse) {
+        console.log(`[API] GBP returned no social links. Falling back to website scraping: ${websiteUrlToUse}`);
+        try {
+          const websiteLinks = await extractSocialLinksFromWebsite(websiteUrlToUse);
+          socialLinks = cleanAndDeduplicateSocialLinks(websiteLinks);
+          console.log(`[API] Found ${socialLinks.length} social links from website fallback`);
+        } catch (websiteError) {
+          console.error(`[API] Website fallback also failed:`, websiteError);
+          // Continue with empty social links - at least we'll capture the website screenshot
+        }
+      }
 
     // Now capture screenshots in parallel after links are extracted
     const screenshotPromises: Promise<{ platform: string; url: string; screenshot: string | null; status: 'success' | 'error' } | { websiteScreenshot: string | null }>[] = [];
