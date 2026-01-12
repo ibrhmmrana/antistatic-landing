@@ -306,7 +306,7 @@ export default function StageReviewSentiment({
                 style={{
                   zIndex: 10 + idx, // Later cards on top (sticker effect)
                   transform: `rotate(${transform.rotate}) translateX(${transform.x}px)`,
-                  animation: `fadeInUp 0.4s ease-out ${idx * 100}ms forwards`,
+                  animation: `fadeInUp 0.5s ease-out ${idx * 450}ms forwards`,
                   overflow: 'visible',
                   opacity: 0, // Start hidden, animation will make it visible
                 }}

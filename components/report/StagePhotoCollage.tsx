@@ -267,10 +267,10 @@ export default function StagePhotoCollage({
     
     // If current visible image has loaded and there are more images, show the next one
     if (loadedImages.has(visibleCount - 1) && visibleCount < photosToShow.length) {
-      // Wait a bit before showing next (250ms delay for smooth animation)
+      // Wait a bit before showing next (400ms delay for smooth animation - slightly slower)
       const timer = setTimeout(() => {
         setVisibleCount(prev => prev + 1);
-      }, 250);
+      }, 400);
       
       return () => clearTimeout(timer);
     }
@@ -371,7 +371,7 @@ export default function StagePhotoCollage({
           return (
             <div
               key={photo.ref}
-              className="absolute transition-[opacity,transform] duration-500 ease-out will-change-[opacity,transform]"
+              className="absolute transition-[opacity,transform] duration-[600ms] ease-out will-change-[opacity,transform]"
               style={{
                 left: `${slot.leftPct}%`,
                 top: `${slot.topPct}%`,
