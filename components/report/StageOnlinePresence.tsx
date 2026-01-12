@@ -195,6 +195,80 @@ export default function StageOnlinePresence({
     return () => clearInterval(interval);
   }, [scanId, businessName, address, loading, data, initialData]);
 
+  // Poll for individual screenshot updates (so Facebook can display before Instagram completes)
+  useEffect(() => {
+    // Skip polling if we have initialData (parent manages updates) or if we're still loading initial data
+    if (initialData || loading || !data) {
+      return;
+    }
+
+    // Check if we're missing any screenshots
+    const hasMissingScreenshots = data.socialLinks.some(link => link.url && !link.screenshot);
+    if (!hasMissingScreenshots) {
+      return; // All screenshots are ready, no need to poll
+    }
+
+    const pollForUpdates = async () => {
+      try {
+        const storedMetadata = localStorage.getItem(`onlinePresence_${scanId}`);
+        if (!storedMetadata) return;
+
+        const response = await fetch('/api/scan/socials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            businessName,
+            address,
+            scanId,
+            websiteUrl: data.websiteUrl || null,
+          }),
+        });
+
+        if (!response.ok) return;
+
+        const result = await response.json();
+        
+        // Check if any new screenshots have been added
+        let hasUpdates = false;
+        const updatedSocialLinks = data.socialLinks.map(existingLink => {
+          const newLink = result.socialLinks?.find((l: any) => 
+            l.platform === existingLink.platform && l.url === existingLink.url
+          );
+          
+          // If we found a new screenshot that we didn't have before
+          if (newLink?.screenshot && !existingLink.screenshot) {
+            hasUpdates = true;
+            return {
+              ...existingLink,
+              screenshot: newLink.screenshot,
+              status: 'success' as const,
+            };
+          }
+          return existingLink;
+        });
+
+        // Update state if we found new screenshots
+        if (hasUpdates) {
+          setData(prev => prev ? {
+            ...prev,
+            socialLinks: updatedSocialLinks,
+          } : null);
+        }
+      } catch (err) {
+        // Silently fail - polling shouldn't break the UI
+        console.debug('Polling for screenshot updates failed:', err);
+      }
+    };
+
+    // Poll every 3 seconds for screenshot updates
+    const pollInterval = setInterval(pollForUpdates, 3000);
+    
+    // Also run immediately
+    pollForUpdates();
+
+    return () => clearInterval(pollInterval);
+  }, [scanId, businessName, address, data, initialData, loading]);
+
   // Website Screenshot Component with browser chrome (Windows style)
   const WebsiteScreenshot = ({ 
     screenshot, 

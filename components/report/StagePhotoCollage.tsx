@@ -267,10 +267,10 @@ export default function StagePhotoCollage({
     
     // If current visible image has loaded and there are more images, show the next one
     if (loadedImages.has(visibleCount - 1) && visibleCount < photosToShow.length) {
-      // Wait a bit before showing next (400ms delay for smooth animation - slightly slower)
+      // Wait 2 seconds before showing next image
       const timer = setTimeout(() => {
         setVisibleCount(prev => prev + 1);
-      }, 400);
+      }, 2000);
       
       return () => clearTimeout(timer);
     }
