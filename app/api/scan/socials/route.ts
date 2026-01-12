@@ -35,6 +35,27 @@ function randomDelay(minMs: number, maxMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delay));
 }
 
+/**
+ * Gets a random residential proxy from environment variable.
+ * Format: RESIDENTIAL_PROXIES="http://user:pass@proxy1:port,http://user:pass@proxy2:port"
+ * Returns null if not configured.
+ */
+function getRandomProxy(): string | null {
+  const proxiesEnv = process.env.RESIDENTIAL_PROXIES;
+  if (!proxiesEnv) {
+    return null;
+  }
+  
+  const proxies = proxiesEnv.split(',').map(p => p.trim()).filter(p => p.length > 0);
+  if (proxies.length === 0) {
+    return null;
+  }
+  
+  const randomProxy = proxies[Math.floor(Math.random() * proxies.length)];
+  console.log(`[DEBUG] Using residential proxy: ${randomProxy.replace(/:[^:@]+@/, ':****@')}`); // Mask password
+  return randomProxy;
+}
+
 async function humanMouseMove(page: Page): Promise<void> {
   // Simulate human-like mouse movement across the page
   const viewportSize = page.viewportSize();
@@ -445,7 +466,18 @@ async function extractSocialLinksFromGBP(
     }
     
     const headless = isServerless ? chromium.headless : false;
-    console.log(`[DEBUG] Launching browser - isServerless: ${isServerless}, headless: ${headless}, executablePath: ${executablePath || 'default'}`);
+    
+    // Get residential proxy if configured
+    const proxyServer = getRandomProxy();
+    const browserArgs: string[] = [];
+    
+    // Add proxy if configured
+    if (proxyServer) {
+      browserArgs.push(`--proxy-server=${proxyServer}`);
+      console.log(`[DEBUG] Proxy configured: ${proxyServer.replace(/:[^:@]+@/, ':****@')}`);
+    }
+    
+    console.log(`[DEBUG] Launching browser - isServerless: ${isServerless}, headless: ${headless}, executablePath: ${executablePath || 'default'}, proxy: ${proxyServer ? 'yes' : 'no'}`);
 
     // Launch a Chromium browser
     // Run headful locally for debugging, headless in serverless
@@ -456,6 +488,7 @@ async function extractSocialLinksFromGBP(
           headless: chromium.headless,
           args: [
             ...chromium.args,
+            ...browserArgs,
             '--disable-blink-features=AutomationControlled',
             '--window-size=1920,1080',
             '--disable-web-security',
@@ -469,6 +502,7 @@ async function extractSocialLinksFromGBP(
         browser = await pwChromium.launch({
           headless: true,
           args: [
+            ...browserArgs,
             '--disable-blink-features=AutomationControlled',
             '--window-size=1920,1080',
           ],
@@ -513,8 +547,8 @@ async function extractSocialLinksFromGBP(
     page.setDefaultTimeout(DEFAULT_ACTION_TIMEOUT_MS);
     page.setDefaultNavigationTimeout(DEFAULT_NAV_TIMEOUT_MS);
 
-    // Only apply stealth techniques in serverless (not needed for local debugging)
-    if (isServerless) {
+    // Apply stealth techniques in serverless OR when using residential proxies
+    if (isServerless || proxyServer) {
       // Set comprehensive HTTP headers including Chrome Client Hints (Sec-CH-*)
       await page.setExtraHTTPHeaders({
         'Accept-Language': 'en-US,en;q=0.9',
@@ -532,150 +566,192 @@ async function extractSocialLinksFromGBP(
       });
     }
     
-    // CRITICAL: Comprehensive stealth script to bypass headless detection (serverless only)
-    if (isServerless) {
-    await page.addInitScript(() => {
-      // Delete webdriver property entirely
-      delete (navigator as any).__proto__.webdriver;
-      
-      // Also override it in case it gets re-added
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined,
-        configurable: true,
-      });
+    // CRITICAL: Advanced stealth script to bypass headless detection
+    // Apply in serverless OR when using residential proxies
+    if (isServerless || proxyServer) {
+      await page.addInitScript(() => {
+        // 1. Remove webdriver property entirely
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => false,
+          enumerable: true,
+          configurable: true
+        });
 
-      // Override chrome object with realistic properties
-      Object.defineProperty(window, 'chrome', {
-        writable: true,
-        enumerable: true,
-        configurable: true,
-        value: {
-          runtime: {
-            PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' },
-            PlatformArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' },
-            PlatformNaclArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' },
-            RequestUpdateCheckStatus: { THROTTLED: 'throttled', NO_UPDATE: 'no_update', UPDATE_AVAILABLE: 'update_available' },
-            OnInstalledReason: { INSTALL: 'install', UPDATE: 'update', CHROME_UPDATE: 'chrome_update', SHARED_MODULE_UPDATE: 'shared_module_update' },
-            OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' },
+        // 2. Override Chrome's runtime with realistic data
+        (window as any).chrome = {
+          runtime: {},
+          loadTimes: function() {
+            return {
+              requestTime: Date.now(),
+              startLoadTime: Date.now() - Math.random() * 1000,
+              commitLoadTime: Date.now(),
+              finishDocumentLoadTime: Date.now() + Math.random() * 100,
+              firstPaintTime: Date.now() + Math.random() * 200,
+              firstPaintAfterLoadTime: Date.now() + Math.random() * 300,
+              navigationType: 'Reload',
+              wasFetchedViaSpdy: true,
+              wasNpnNegotiated: true,
+              npnNegotiatedProtocol: 'h2',
+              wasAlternateProtocolAvailable: false,
+              connectionInfo: 'h2'
+            };
           },
-          loadTimes: function() { return {}; },
-          csi: function() { return {}; },
+          csi: function() {
+            return {
+              onloadT: Date.now(),
+              startE: Date.now() - Math.random() * 100,
+              pageT: Date.now() + Math.random() * 200
+            };
+          },
           app: {
             isInstalled: false,
-            InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
-            RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
-          },
-        },
-      });
-
-      // Override permissions query to look realistic
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters: any) => {
-        if (parameters.name === 'notifications') {
-          return Promise.resolve({ state: Notification.permission, onchange: null } as PermissionStatus);
-        }
-        return originalQuery.call(window.navigator.permissions, parameters);
-      };
-
-      // Realistic plugins array (mimics Chrome)
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => {
-          const plugins = [
-            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-          ];
-          const pluginArray = Object.create(PluginArray.prototype);
-          plugins.forEach((p, i) => {
-            const plugin = Object.create(Plugin.prototype);
-            Object.defineProperties(plugin, {
-              name: { value: p.name },
-              filename: { value: p.filename },
-              description: { value: p.description },
-              length: { value: 0 },
-            });
-            pluginArray[i] = plugin;
-          });
-          Object.defineProperty(pluginArray, 'length', { value: plugins.length });
-          return pluginArray;
-        },
-      });
-
-      // Override languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en'],
-      });
-
-      // Override hardware concurrency (randomize a bit)
-      Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: () => 8,
-      });
-
-      // Override device memory
-      Object.defineProperty(navigator, 'deviceMemory', {
-        get: () => 8,
-      });
-
-      // Override connection info
-      Object.defineProperty(navigator, 'connection', {
-        get: () => ({
-          effectiveType: '4g',
-          rtt: 50,
-          downlink: 10,
-          saveData: false,
-        }),
-      });
-
-      // WebGL fingerprint spoofing
-      const getParameterOriginal = WebGLRenderingContext.prototype.getParameter;
-      WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
-        if (parameter === 37445) return 'Google Inc. (Intel)'; // UNMASKED_VENDOR_WEBGL
-        if (parameter === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)'; // UNMASKED_RENDERER_WEBGL
-        return getParameterOriginal.call(this, parameter);
-      };
-
-      // Also handle WebGL2
-      if (typeof WebGL2RenderingContext !== 'undefined') {
-        const getParameter2Original = WebGL2RenderingContext.prototype.getParameter;
-        WebGL2RenderingContext.prototype.getParameter = function(parameter: number) {
-          if (parameter === 37445) return 'Google Inc. (Intel)';
-          if (parameter === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-          return getParameter2Original.call(this, parameter);
-        };
-      }
-
-      // Mask automation-related window properties
-      Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
-      Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 85 }); // Account for Chrome UI
-      
-      // Override screen properties to look normal
-      Object.defineProperty(screen, 'availWidth', { get: () => screen.width });
-      Object.defineProperty(screen, 'availHeight', { get: () => screen.height - 40 }); // Taskbar
-
-      // Fix iframe contentWindow detection
-      const originalContentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
-      Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
-        get: function() {
-          const win = originalContentWindow?.get?.call(this);
-          if (win) {
-            try {
-              // Ensure webdriver is also false in iframes
-              Object.defineProperty(win.navigator, 'webdriver', { get: () => undefined });
-            } catch (e) { /* cross-origin, ignore */ }
+            InstallState: {
+              DISABLED: 'disabled',
+              INSTALLED: 'installed',
+              NOT_INSTALLED: 'not_installed'
+            },
+            RunningState: {
+              CANNOT_RUN: 'cannot_run',
+              READY_TO_RUN: 'ready_to_run',
+              RUNNING: 'running'
+            }
           }
-          return win;
-        },
-      });
+        };
 
-      // Prevent detection via toString
-      const oldCall = Function.prototype.call;
-      Function.prototype.call = function(...args: any[]) {
-        if (args[0] === null && this === toString) {
-          return 'function webdriver() { [native code] }';
-        }
-        return oldCall.apply(this, args);
-      };
-    });
+        // 3. Override permissions
+        const originalQuery = (window.navigator.permissions as any).query;
+        (window.navigator.permissions as any).query = (parameters: any) => {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: Notification.permission });
+          }
+          return originalQuery(parameters);
+        };
+
+        // 4. Spoof WebGL Vendor
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+          if (parameter === 37445) {
+            return 'Intel Inc.';
+          }
+          if (parameter === 37446) {
+            return 'Intel Iris OpenGL Engine';
+          }
+          return getParameter.call(this, parameter);
+        };
+
+        // 5. Spoof User Agent data
+        Object.defineProperty(navigator, 'userAgentData', {
+          get: () => ({
+            brands: [
+              { brand: 'Chromium', version: '122' },
+              { brand: 'Not=A?Brand', version: '24' },
+              { brand: 'Google Chrome', version: '122' }
+            ],
+            mobile: false,
+            platform: 'Windows'
+          })
+        });
+
+        // 6. Override language properties
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en', 'es']
+        });
+
+        // 7. Override plugins to look like real Chrome
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [
+            {
+              name: 'Chrome PDF Plugin',
+              filename: 'internal-pdf-viewer',
+              description: 'Portable Document Format'
+            },
+            {
+              name: 'Chrome PDF Viewer',
+              filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+              description: ''
+            },
+            {
+              name: 'Native Client',
+              filename: 'internal-nacl-plugin',
+              description: ''
+            }
+          ]
+        });
+
+        // 8. Canvas fingerprint spoofing
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type?: string, ...args: any[]) {
+          const context = this.getContext('2d');
+          if (context) {
+            context.font = '14px Arial';
+            context.fillStyle = '#000';
+            context.fillText('Spoofed Canvas', 10, 20);
+          }
+          return originalToDataURL.call(this, type, ...args);
+        };
+
+        // 9. Audio fingerprint spoofing
+        const originalGetChannelData = AudioBuffer.prototype.getChannelData;
+        AudioBuffer.prototype.getChannelData = function(channel: number) {
+          const result = originalGetChannelData.call(this, channel);
+          if (result.length > 0) {
+            for (let i = 0; i < result.length; i++) {
+              result[i] += (Math.random() - 0.5) * 0.0001; // Add small noise
+            }
+          }
+          return result;
+        };
+
+        // 10. Override media devices
+        Object.defineProperty(navigator.mediaDevices, 'enumerateDevices', {
+          value: () => Promise.resolve([
+            {
+              deviceId: 'default',
+              kind: 'audioinput',
+              label: 'Default Microphone',
+              groupId: 'default'
+            },
+            {
+              deviceId: 'default',
+              kind: 'audiooutput',
+              label: 'Default Speaker',
+              groupId: 'default'
+            },
+            {
+              deviceId: 'default',
+              kind: 'videoinput',
+              label: 'Default Camera',
+              groupId: 'default'
+            }
+          ])
+        });
+
+        // Additional: Override hardware properties
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => 8
+        });
+
+        Object.defineProperty(navigator, 'deviceMemory', {
+          get: () => 8
+        });
+
+        // Additional: Override connection info
+        Object.defineProperty(navigator, 'connection', {
+          get: () => ({
+            effectiveType: '4g',
+            rtt: 50,
+            downlink: 10,
+            saveData: false
+          })
+        });
+
+        // Additional: Mask automation-related window properties
+        Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
+        Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 85 });
+        
+        Object.defineProperty(screen, 'availWidth', { get: () => screen.width });
+        Object.defineProperty(screen, 'availHeight', { get: () => screen.height - 40 });
+      });
     } // End of isServerless stealth block
 
     // Construct the search query: "BusinessName FullAddress"
