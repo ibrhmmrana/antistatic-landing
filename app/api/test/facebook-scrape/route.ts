@@ -204,20 +204,91 @@ async function extractHoursAndServices(page: Page): Promise<{ hours: string | nu
   let serviceOptions: string | null = null;
   
   try {
-    // Find and click the hours button (contains "Closed now" or similar)
-    const hoursButton = page.locator('div[role="button"]').filter({ hasText: /Closed now|Open now|Hours/i }).first();
-    const buttonVisible = await hoursButton.isVisible({ timeout: 3000 }).catch(() => false);
+    // First, scroll up to make sure About section is visible
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(1000);
     
-    if (buttonVisible) {
-      console.log(`[FB-SCRAPE] Found hours button, clicking...`);
-      await hoursButton.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-      await hoursButton.click({ timeout: 3000 }).catch((err) => {
-        console.log(`[FB-SCRAPE] Failed to click hours button:`, err);
+    // Wait for the page content to be more fully loaded
+    await page.waitForSelector('h1', { timeout: 5000 }).catch(() => {
+      console.log(`[FB-SCRAPE] No h1 found, page might not be fully loaded`);
+    });
+    
+    // Scroll down a bit to reveal the About section (usually below the cover photo)
+    await page.evaluate(() => window.scrollBy(0, 500));
+    await page.waitForTimeout(1500);
+    
+    // Try to find the hours button using evaluate for more flexibility
+    const buttonInfo = await page.evaluate(() => {
+      // Look for span containing hours-related text inside a button
+      const allSpans = document.querySelectorAll('span[dir="auto"]');
+      const candidateTexts: string[] = [];
+      let foundButton = false;
+      
+      for (const span of Array.from(allSpans)) {
+        const text = span.textContent?.trim() || '';
+        // Log spans that might be related to hours
+        if (text.length > 0 && text.length < 50 && /^(Closed|Open|Hours|Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(text)) {
+          candidateTexts.push(text);
+        }
+        // Match: "Closed now", "Open now", "Opens at", "Closes at", "Open until", "Closed until"
+        if (/^(Closed|Open)/i.test(text)) {
+          // Find parent button
+          const button = span.closest('div[role="button"]');
+          if (button) {
+            foundButton = true;
+          }
+        }
+      }
+      return { found: foundButton, candidates: candidateTexts };
+    });
+    
+    console.log(`[FB-SCRAPE] Hours button candidates found:`, buttonInfo.candidates);
+    const buttonFound = buttonInfo.found;
+    
+    console.log(`[FB-SCRAPE] Hours button found via evaluate: ${buttonFound}`);
+    
+    if (buttonFound) {
+      // Remove any login popup first
+      await removeLoginPopup(page);
+      await page.waitForTimeout(300);
+      
+      // Scroll the button into view and click it
+      await page.evaluate(() => {
+        const allSpans = document.querySelectorAll('span[dir="auto"]');
+        for (const span of Array.from(allSpans)) {
+          const text = span.textContent?.trim() || '';
+          if (/^(Closed|Open)/i.test(text)) {
+            const button = span.closest('div[role="button"]');
+            if (button) {
+              // Scroll into view first
+              button.scrollIntoView({ behavior: 'instant', block: 'center' });
+              return;
+            }
+          }
+        }
       });
       
+      await page.waitForTimeout(500);
+      
+      // Now click the button
+      await page.evaluate(() => {
+        const allSpans = document.querySelectorAll('span[dir="auto"]');
+        for (const span of Array.from(allSpans)) {
+          const text = span.textContent?.trim() || '';
+          if (/^(Closed|Open)/i.test(text)) {
+            const button = span.closest('div[role="button"]');
+            if (button) {
+              (button as HTMLElement).click();
+              return;
+            }
+          }
+        }
+      });
+      
+      console.log(`[FB-SCRAPE] Clicked hours button, waiting for popup...`);
+      
       // Wait for popup to appear
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(2500);
       
       // Extract hours and services from popup
       const popupData = await page.evaluate(() => {
@@ -226,75 +297,173 @@ async function extractHoursAndServices(page: Page): Promise<{ hours: string | nu
           return t && t.length > 0 ? t : null;
         };
         
-        // Find the popup (has class x5yr21d)
-        const popup = document.querySelector('div.x5yr21d');
-        if (!popup) return { hours: null, serviceOptions: null };
+        console.log('[FB-SCRAPE] Looking for popup...');
         
-        // Extract hours - look for day/time pairs
-        const hoursData: string[] = [];
-        // Find all day rows - they are in div.x9f619.x1ja2u2z.x2lah0s.x1n2onr6.x1qughib
-        const dayRows = popup.querySelectorAll('div.x9f619.x1ja2u2z.x2lah0s.x1n2onr6.x1qughib');
+        // Find the Hours dialog - it has role="dialog" and aria-label="Hours"
+        let popup: Element | null = document.querySelector('div[role="dialog"][aria-label="Hours"]');
         
-        for (const row of Array.from(dayRows)) {
-          // Find day name - it's in a span with specific classes
-          const daySpans = row.querySelectorAll('span[dir="auto"]');
-          let dayName: string | null = null;
-          
-          for (const span of Array.from(daySpans)) {
-            const text = getText(span);
-            if (text && /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/i.test(text)) {
-              dayName = text;
+        if (!popup) {
+          // Fallback: try finding by x5yr21d class (inner content area of dialog)
+          popup = document.querySelector('div.x5yr21d');
+        }
+        if (!popup) {
+          // Try finding the hours section by its container class
+          popup = document.querySelector('div.xyorhqc.xh8yej3');
+        }
+        if (!popup) {
+          // Last resort: find any container that has Monday text
+          const mondaySpans = document.querySelectorAll('span[dir="auto"]');
+          for (const span of Array.from(mondaySpans)) {
+            if (span.textContent?.trim() === 'Monday') {
+              popup = span.closest('div[role="dialog"]') || span.closest('div.xyorhqc') || span.parentElement?.parentElement?.parentElement?.parentElement;
               break;
             }
           }
+        }
+        
+        if (!popup) {
+          console.log('[FB-SCRAPE] Popup not found!');
+          return { hours: null, serviceOptions: null, debug: 'popup not found' };
+        }
+        
+        console.log('[FB-SCRAPE] Popup found:', popup.getAttribute('role'), popup.getAttribute('aria-label'));
+        
+        console.log('[FB-SCRAPE] Popup found, extracting hours...');
+        
+        // Extract hours - look for day/time pairs
+        const hoursData: string[] = [];
+        const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        
+        // Find the hours container within the popup (div.xyorhqc.xh8yej3)
+        const hoursContainer = popup.querySelector('div.xyorhqc.xh8yej3') || popup;
+        console.log('[FB-SCRAPE] Hours container found:', !!hoursContainer);
+        
+        // Method 1: Find day rows by their class structure
+        // Each day row has class: x9f619 x1ja2u2z x2lah0s x1n2onr6 x1qughib xozqiw3
+        let dayRows = hoursContainer.querySelectorAll('div.x9f619.x1ja2u2z.x2lah0s.x1n2onr6.x1qughib.xozqiw3');
+        console.log('[FB-SCRAPE] Found', dayRows.length, 'day rows using xozqiw3 selector');
+        
+        // Fallback selector if none found
+        if (dayRows.length === 0) {
+          dayRows = hoursContainer.querySelectorAll('div.x9f619.x1ja2u2z.x2lah0s.x1n2onr6.x1qughib');
+          console.log('[FB-SCRAPE] Found', dayRows.length, 'day rows using x1qughib selector');
+        }
+        
+        // Process day rows
+        for (const row of Array.from(dayRows)) {
+          const spans = row.querySelectorAll('span[dir="auto"]');
+          let dayName: string | null = null;
+          const times: string[] = [];
           
-          if (dayName) {
-            // Find all time spans in this row (they have class containing xi81zsa)
-            const timeSpans = row.querySelectorAll('span.xi81zsa[dir="auto"]');
-            const times: string[] = [];
+          for (const span of Array.from(spans)) {
+            const text = getText(span);
+            if (!text) continue;
             
-            for (const timeSpan of Array.from(timeSpans)) {
-              const timeText = getText(timeSpan);
-              if (timeText && (/^\d{2}:\d{2}\s*-\s*\d{2}:\d{2}$/.test(timeText) || /^CLOSED$/i.test(timeText))) {
-                times.push(timeText);
-              }
-            }
-            
-            if (times.length > 0) {
-              hoursData.push(`${dayName}: ${times.join(', ')}`);
+            if (daysOfWeek.includes(text)) {
+              dayName = text;
+            } else if (/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(text) || text === 'CLOSED') {
+              times.push(text);
             }
           }
+          
+          if (dayName && times.length > 0) {
+            hoursData.push(`${dayName}: ${times.join(', ')}`);
+          }
+        }
+        
+        // Method 2: If day rows method didn't work, use sequential span parsing
+        if (hoursData.length === 0) {
+          console.log('[FB-SCRAPE] Day rows method failed, trying sequential span parsing...');
+          const allSpans = hoursContainer.querySelectorAll('span[dir="auto"]');
+          let currentDay: string | null = null;
+          const dayTimesMap: { [key: string]: string[] } = {};
+          
+          for (const span of Array.from(allSpans)) {
+            const text = getText(span);
+            if (!text) continue;
+            
+            if (daysOfWeek.includes(text)) {
+              currentDay = text;
+              if (!dayTimesMap[currentDay]) {
+                dayTimesMap[currentDay] = [];
+              }
+            } else if (currentDay && (/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(text) || text === 'CLOSED')) {
+              dayTimesMap[currentDay].push(text);
+            }
+          }
+          
+          // Build hours data from map
+          for (const day of daysOfWeek) {
+            if (dayTimesMap[day] && dayTimesMap[day].length > 0) {
+              hoursData.push(`${day}: ${dayTimesMap[day].join(', ')}`);
+            }
+          }
+          console.log('[FB-SCRAPE] Sequential parsing found:', hoursData.length, 'days');
         }
         
         const hours = hoursData.length > 0 ? hoursData.join('; ') : null;
+        console.log('[FB-SCRAPE] Extracted hours:', hours);
         
-        // Extract services - look for "Services" section
+        // Extract services - look for "Services" section in the popup dialog
         let services: string | null = null;
-        const servicesSection = Array.from(popup.querySelectorAll('span[dir="auto"]')).find(span => 
+        
+        // Look for Services heading in the popup
+        const servicesHeading = Array.from(popup.querySelectorAll('span[dir="auto"]')).find(span => 
           getText(span) === 'Services'
         );
         
-        if (servicesSection) {
-          // Find the parent container that holds all services
-          const servicesContainer = servicesSection.closest('div.x9f619.x1n2onr6.x1ja2u2z.x78zum5.xdt5ytf.x193iq5w.xeuugli.x1r8uery');
+        if (servicesHeading) {
+          console.log('[FB-SCRAPE] Found Services heading in popup');
+          // Find service items - they're in div.x1y1aw1k.xwib8y2.x152qxlz span[dir="auto"]
+          const servicesContainer = servicesHeading.closest('div.x9f619.x1n2onr6.x1ja2u2z');
           if (servicesContainer) {
-            // Find all service items - they're in div.x1y1aw1k.xwib8y2.x152qxlz
-            const serviceItems = servicesContainer.querySelectorAll('div.x1y1aw1k.xwib8y2.x152qxlz span[dir="auto"]');
-            const serviceList: string[] = [];
-            for (const serviceSpan of Array.from(serviceItems)) {
-              const serviceText = getText(serviceSpan);
-              if (serviceText && serviceText !== 'Services') {
-                serviceList.push(serviceText);
+            // Look for the parent that contains all service items
+            const parent = servicesContainer.closest('div.x9f619.x1ja2u2z.x78zum5') || servicesContainer.parentElement;
+            if (parent) {
+              // Find service items specifically
+              const serviceItems = parent.querySelectorAll('div.x1y1aw1k.xwib8y2 span[dir="auto"], div.x152qxlz span[dir="auto"]');
+              const serviceList: string[] = [];
+              
+              for (const serviceSpan of Array.from(serviceItems)) {
+                const serviceText = getText(serviceSpan);
+                if (serviceText && serviceText !== 'Services') {
+                  serviceList.push(serviceText);
+                }
               }
-            }
-            if (serviceList.length > 0) {
-              services = serviceList.join(', ');
+              
+              // If specific selector didn't work, try broader approach
+              if (serviceList.length === 0) {
+                const allSpans = parent.querySelectorAll('span[dir="auto"]');
+                for (const span of Array.from(allSpans)) {
+                  const text = getText(span);
+                  if (text && 
+                      text !== 'Services' && 
+                      !text.includes('Updated') &&
+                      !daysOfWeek.includes(text) &&
+                      !/^\d{1,2}:\d{2}/.test(text) &&
+                      text !== 'CLOSED' &&
+                      !text.includes('Popular') &&
+                      text.length < 30) {
+                    serviceList.push(text);
+                  }
+                }
+              }
+              
+              // Dedupe
+              const uniqueServices = [...new Set(serviceList)];
+              if (uniqueServices.length > 0) {
+                services = uniqueServices.join(', ');
+              }
             }
           }
         }
         
-        return { hours, serviceOptions: services };
-      }).catch(() => ({ hours: null, serviceOptions: null }));
+        console.log('[FB-SCRAPE] Extracted services:', services);
+        
+        return { hours, serviceOptions: services, debug: 'success' };
+      });
+      
+      console.log(`[FB-SCRAPE] Popup extraction result:`, JSON.stringify(popupData));
       
       hours = popupData.hours;
       serviceOptions = popupData.serviceOptions;
@@ -308,6 +477,50 @@ async function extractHoursAndServices(page: Page): Promise<{ hours: string | nu
   } catch (error) {
     console.log(`[FB-SCRAPE] Error extracting hours/services:`, error);
   }
+  
+  // Fallback: try to extract services from the main page if not found in popup
+  if (!serviceOptions) {
+    console.log(`[FB-SCRAPE] Trying to extract services from main page...`);
+    serviceOptions = await page.evaluate(() => {
+      const getText = (el: Element | null): string | null => {
+        const t = el?.textContent?.trim();
+        return t && t.length > 0 ? t : null;
+      };
+      
+      // Look for Services heading on the main page
+      const allSpans = document.querySelectorAll('span[dir="auto"]');
+      for (const span of Array.from(allSpans)) {
+        const text = getText(span);
+        if (text === 'Services') {
+          // Find the container and look for service items
+          const container = span.closest('div.x9f619.x1n2onr6.x1ja2u2z.x78zum5.xdt5ytf.x193iq5w');
+          if (container) {
+            // Look for service items in nearby elements
+            const parent = container.parentElement;
+            if (parent) {
+              const serviceSpans = parent.querySelectorAll('div.x1y1aw1k span[dir="auto"]');
+              const serviceList: string[] = [];
+              for (const serviceSpan of Array.from(serviceSpans)) {
+                const serviceText = getText(serviceSpan);
+                if (serviceText && serviceText !== 'Services') {
+                  serviceList.push(serviceText);
+                }
+              }
+              if (serviceList.length > 0) {
+                return serviceList.join(', ');
+              }
+            }
+          }
+        }
+      }
+      return null;
+    }).catch(() => null);
+    
+    console.log(`[FB-SCRAPE] Main page services: ${serviceOptions}`);
+  }
+  
+  console.log(`[FB-SCRAPE] Final hours: ${hours}`);
+  console.log(`[FB-SCRAPE] Final serviceOptions: ${serviceOptions}`);
   
   return { hours, serviceOptions };
 }
@@ -1132,8 +1345,8 @@ async function scrapeFacebookProfile(username: string): Promise<FacebookProfileD
       ? await chromium.executablePath()
       : (localExecutablePath || undefined);
 
-    // EXACTLY like Facebook screenshotter: headful for debugging
-    const useHeadless = false;
+    // Run headless for production
+    const useHeadless = true;
     console.log(`[FB-SCRAPE] Launching browser - headless: ${useHeadless}, isServerless: ${isServerless}`);
 
     browser = await pwChromium.launch({
@@ -1244,14 +1457,6 @@ async function scrapeFacebookProfile(username: string): Promise<FacebookProfileD
 
     // Extract posts (profile data already extracted above)
     const posts = await extractFacebookPosts(page);
-
-    // Debug pause - wait until browser is manually closed
-    console.log(`[FB-SCRAPE] 🐛 DEBUG PAUSE: Browser will remain open until you manually close it...`);
-    try {
-      await page.waitForEvent('close', { timeout: 0 });
-    } catch {
-      console.log(`[FB-SCRAPE] 🐛 DEBUG PAUSE: Browser/page closed, resuming...`);
-    }
 
     return {
       ...profileData,
