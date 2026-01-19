@@ -128,7 +128,7 @@ export function calculateDomainSimilarity(name: string, domainHost: string): num
   const nameChars = new Set(nameLower);
   const domainChars = new Set(domainLower);
   let overlap = 0;
-  for (const c of nameChars) if (domainChars.has(c)) overlap++;
+  for (const c of Array.from(nameChars)) if (domainChars.has(c)) overlap++;
   
   return overlap / Math.max(nameChars.size, domainChars.size);
 }
