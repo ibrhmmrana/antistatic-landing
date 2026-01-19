@@ -302,6 +302,7 @@ export default function AnalysisPage() {
             competitors={report.summaryCards.competitors}
             businessName={report.meta.businessName}
             websiteUrl={report.meta.websiteUrl}
+            businessAvatar={report.summaryCards.impact.businessAvatar}
           />
           
           {/* Search Visibility Table */}
