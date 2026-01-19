@@ -9,6 +9,7 @@ import type { BusinessIdentity } from '@/lib/business/resolveBusinessIdentity';
 import { buildOwnerStyleQueries, type OwnerStyleQuery } from './buildOwnerStyleQueries';
 import { fetchMapPackForQuery, type MapPackResult, type MapPackResponse } from '@/lib/maps/fetchMapPackForQuery';
 import { getFaviconUrl } from './favicon';
+import { resolveCategoryFamily, filterServiceKeywordsByFamily } from './categoryFamilies';
 
 // Types
 export interface OrganicResult {
@@ -56,6 +57,11 @@ export interface SearchVisibilityResult {
     business_name: string;
     location_label: string | null;
     service_keywords: string[];
+  };
+  query_generation_debug?: {
+    category_family: string;
+    allowed_services_used: string[];
+    rejected_keywords: string[];
   };
   error?: string;
 }
@@ -466,9 +472,20 @@ export async function getSearchVisibility(params: {
       identity,
       maxQueries,
       detectedServiceIntents: [], // TODO: Extract from site content if available
+      placeTypes: identity.place_types || [],
     });
     
+    // Get query generation debug info
+    const family = resolveCategoryFamily(identity.category_label, identity.place_types || []);
+    const { allowed, rejected } = filterServiceKeywordsByFamily(identity.service_keywords, family);
+    const queryGenDebug = {
+      category_family: family,
+      allowed_services_used: allowed,
+      rejected_keywords: rejected,
+    };
+    
     console.log(`[SEARCH-VIS] Generated ${ownerQueries.length} Owner-style queries for "${identity.business_name}"`);
+    console.log(`[SEARCH-VIS] Category family: ${family}, Allowed services: ${allowed.length}, Rejected: ${rejected.length}`);
     ownerQueries.forEach(q => console.log(`  - [${q.intent}] "${q.query}" (${q.rationale})`));
     
     // Fetch results for each query (Map Pack + Organic)
@@ -526,6 +543,7 @@ export async function getSearchVisibility(params: {
         location_label: identity.location_label,
         service_keywords: identity.service_keywords,
       },
+      query_generation_debug: queryGenDebug,
     };
   } catch (error) {
     console.error('[SEARCH-VIS] Error:', error);
@@ -542,6 +560,11 @@ export async function getSearchVisibility(params: {
         business_name: identity.business_name,
         location_label: identity.location_label,
         service_keywords: identity.service_keywords,
+      },
+      query_generation_debug: {
+        category_family: 'generic_local_business',
+        allowed_services_used: [],
+        rejected_keywords: [],
       },
       error: error instanceof Error ? error.message : 'Unknown error',
     };

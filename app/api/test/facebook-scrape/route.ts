@@ -1004,8 +1004,6 @@ async function extractCommentsFromPost(page: Page, postContainer: any): Promise<
         }
       }
       
-      console.log(`[COMMENT DEBUG] Found ${commentElements.length} comment articles`);
-      
       // Limit to 20 comments
       const maxComments = Math.min(commentElements.length, 20);
       
@@ -1091,7 +1089,7 @@ async function extractCommentsFromPost(page: Page, postContainer: any): Promise<
       
       return results;
     }).catch((err: Error) => {
-      console.log(`[COMMENT DEBUG] Error in evaluate: ${err}`);
+      console.error(`[FB-SCRAPE] Error extracting comments: ${err}`);
       return [];
     });
     

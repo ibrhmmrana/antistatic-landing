@@ -1857,8 +1857,8 @@ async function captureScreenshot(
         : (localExecutablePath || undefined);
 
       // Launch browser
-      // Facebook: use headful mode for debugging
-      const useHeadless = platform === 'facebook' ? false : chromium.headless;
+      // Always use headless mode
+      const useHeadless = true;
       console.log(`[SCREENSHOT] Launching browser - headless: ${useHeadless}, isServerless: ${isServerless}, platform: ${platform}`);
       
       try {
@@ -2719,17 +2719,6 @@ async function captureScreenshot(
     
     console.log(`[SCREENSHOT] Screenshot converted to base64 (${base64Screenshot.length} chars)`);
     console.log(`[SCREENSHOT] ✅ Screenshot capture successful`);
-
-    // Debug pause for Facebook (headful mode) - waits until browser is manually closed
-    if (platform === 'facebook') {
-      console.log(`[SCREENSHOT] 🐛 DEBUG PAUSE: Browser will remain open until you manually close it...`);
-      try {
-        await page.waitForEvent('close', { timeout: 0 });
-      } catch (error) {
-        // If page.close() is called or browser closes, this will resolve
-        console.log(`[SCREENSHOT] 🐛 DEBUG PAUSE: Browser/page closed, resuming...`);
-      }
-    }
 
     return {
       success: true,

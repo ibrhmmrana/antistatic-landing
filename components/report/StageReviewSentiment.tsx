@@ -101,13 +101,22 @@ export default function StageReviewSentiment({
     return () => window.removeEventListener('resize', calculateScale);
   }, [data]);
 
-  // Auto-advance to next stage after 8.5 seconds
+  // Auto-advance to next stage after all reviews have appeared + 2 seconds
   useEffect(() => {
-    if (loading || error || !data) return;
+    if (loading || error || !data || !data.reviews || data.reviews.length === 0) return;
+
+    const reviews = data.reviews.slice(0, 5); // Max 5 reviews shown
+    const lastReviewIndex = reviews.length - 1;
+    // Last review animation starts at: lastReviewIndex * 3000ms
+    // Animation duration is 0.5s (500ms), so review is fully visible at: (lastReviewIndex * 3000) + 500
+    // Wait 2 seconds after last review is fully visible
+    const animationDuration = 500; // fadeInUp animation duration
+    const delayAfterLastReview = 2000;
+    const totalDelay = (lastReviewIndex * 3000) + animationDuration + delayAfterLastReview;
 
     const timeout = setTimeout(() => {
       onComplete?.();
-    }, 8500); // 8.5 seconds
+    }, totalDelay);
 
     return () => clearTimeout(timeout);
   }, [loading, error, data, onComplete]);
@@ -306,7 +315,7 @@ export default function StageReviewSentiment({
                 style={{
                   zIndex: 10 + idx, // Later cards on top (sticker effect)
                   transform: `rotate(${transform.rotate}) translateX(${transform.x}px)`,
-                  animation: `fadeInUp 0.5s ease-out ${idx * 1000}ms forwards`,
+                  animation: `fadeInUp 0.5s ease-out ${idx * 3000}ms forwards`,
                   overflow: 'visible',
                   opacity: 0, // Start hidden, animation will make it visible
                 }}

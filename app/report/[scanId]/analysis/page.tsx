@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { debounce } from "@/lib/utils/debounce";
 
 // =============================================================================
@@ -436,7 +437,34 @@ interface FacebookProfileData {
 // MAIN COMPONENT
 // =============================================================================
 
-export default function TestSocialScraper() {
+// Helper to extract username from social URL
+function extractUsernameFromUrl(url: string, platform: 'instagram' | 'facebook'): string | null {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const parts = pathname.replace(/^\/|\/$/g, '').split('/');
+    
+    if (platform === 'instagram') {
+      if (parts[0] && parts[0] !== 'p' && parts[0] !== 'reel' && parts[0] !== 'stories') {
+        return parts[0];
+      }
+    } else if (platform === 'facebook') {
+      if (parts[0] && parts[0] !== 'pages' && parts[0] !== 'profile' && parts[0] !== 'people') {
+        return parts[0];
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export default function AnalysisPage() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const scanId = params?.scanId as string;
+  const placeId = searchParams?.get('placeId') || '';
+
   // Instagram state
   const [igUsername, setIgUsername] = useState("");
   const [igLoading, setIgLoading] = useState(false);
@@ -506,6 +534,217 @@ export default function TestSocialScraper() {
   } | null>(null);
   const [gbpError, setGbpError] = useState<string | null>(null);
   const [gbpExpandedItem, setGbpExpandedItem] = useState<string | null>(null);
+  
+  // Reviews state
+  const [reviews, setReviews] = useState<Array<{
+    reviewId: string;
+    authorName: string;
+    profilePhotoUrl: string | null;
+    relativeTime: string | null;
+    rating: number;
+    text: string;
+    isLocalGuide: boolean;
+  }>>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState<string | null>(null);
+
+  // Load cached analysis results from localStorage (pre-filled during onboarding)
+  useEffect(() => {
+    console.log('[ANALYSIS PAGE] Loading cached results from localStorage...');
+    
+    // Track what we loaded from cache (to avoid triggering fallbacks)
+    let loadedGbp = false;
+    let loadedWebsite = false;
+    let loadedIg = false;
+    let loadedFb = false;
+    let extractedWebsiteUrl: string | null = null;
+    
+    // 1. Load GBP analysis from cache
+    const cachedGbp = localStorage.getItem(`analysis_${scanId}_gbp`);
+    if (cachedGbp) {
+      try {
+        const data = JSON.parse(cachedGbp);
+        setGbpAnalysis(data);
+        loadedGbp = true;
+        console.log('[ANALYSIS PAGE] ✅ Loaded GBP analysis from cache');
+      } catch (error) {
+        console.error('[ANALYSIS PAGE] Failed to parse GBP cache:', error);
+      }
+    }
+    
+    // 2. Load website analysis from cache
+    const cachedWebsite = localStorage.getItem(`analysis_${scanId}_website`);
+    if (cachedWebsite) {
+      try {
+        const data = JSON.parse(cachedWebsite);
+        setWebsiteResult(data);
+        loadedWebsite = true;
+        if (data.scrape_metadata?.url) {
+          setWebsiteUrl(data.scrape_metadata.url);
+          extractedWebsiteUrl = data.scrape_metadata.url;
+        }
+        console.log('[ANALYSIS PAGE] ✅ Loaded website analysis from cache');
+      } catch (error) {
+        console.error('[ANALYSIS PAGE] Failed to parse website cache:', error);
+      }
+    }
+    
+    // 3. Load Instagram analysis from cache
+    const cachedIg = localStorage.getItem(`analysis_${scanId}_instagram`);
+    if (cachedIg) {
+      try {
+        const data = JSON.parse(cachedIg);
+        setIgResult(data);
+        loadedIg = true;
+        if (data.profile?.username) {
+          setIgUsername(data.profile.username);
+        }
+        console.log('[ANALYSIS PAGE] ✅ Loaded Instagram analysis from cache');
+      } catch (error) {
+        console.error('[ANALYSIS PAGE] Failed to parse Instagram cache:', error);
+      }
+    }
+    
+    // 4. Load Facebook analysis from cache
+    const cachedFb = localStorage.getItem(`analysis_${scanId}_facebook`);
+    if (cachedFb) {
+      try {
+        const data = JSON.parse(cachedFb);
+        setFbResult(data);
+        loadedFb = true;
+        console.log('[ANALYSIS PAGE] ✅ Loaded Facebook analysis from cache');
+      } catch (error) {
+        console.error('[ANALYSIS PAGE] Failed to parse Facebook cache:', error);
+      }
+    }
+    
+    // 5. Extract website URL and social links for display
+    const onlinePresenceMetadata = localStorage.getItem(`onlinePresence_${scanId}`);
+    let igUsernameFromMeta: string | null = null;
+    let fbUsernameFromMeta: string | null = null;
+    if (onlinePresenceMetadata) {
+      const parsed = JSON.parse(onlinePresenceMetadata);
+      if (parsed.websiteUrl && !extractedWebsiteUrl) {
+        setWebsiteUrl(parsed.websiteUrl);
+        extractedWebsiteUrl = parsed.websiteUrl;
+      }
+      if (parsed.socialLinks) {
+        parsed.socialLinks.forEach((link: { platform: string; url: string }) => {
+          if (link.platform === 'instagram') {
+            const username = extractUsernameFromUrl(link.url, 'instagram');
+            if (username) {
+              setIgUsername(username);
+              igUsernameFromMeta = username;
+            }
+          } else if (link.platform === 'facebook') {
+            const username = extractUsernameFromUrl(link.url, 'facebook');
+            if (username) {
+              setFbUsername(username);
+              fbUsernameFromMeta = username;
+            }
+          }
+        });
+      }
+    }
+    
+    // 6. FALLBACK: Only trigger if NOT loaded from cache
+    if (placeId && !loadedGbp) {
+      console.log('[ANALYSIS PAGE] ⚠️ GBP not in cache, triggering...');
+      setGbpLoading(true);
+      fetch(`/api/gbp/place-details?place_id=${encodeURIComponent(placeId)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          setGbpAnalysis(data);
+          localStorage.setItem(`analysis_${scanId}_gbp`, JSON.stringify(data));
+        })
+        .catch(err => setGbpError(err.message || 'An error occurred'))
+        .finally(() => setGbpLoading(false));
+    }
+    
+    // 7. Fetch reviews when placeId is available
+    if (placeId) {
+      const cachedReviews = localStorage.getItem(`analysis_${scanId}_reviews`);
+      if (cachedReviews) {
+        try {
+          const data = JSON.parse(cachedReviews);
+          setReviews(data.reviews || []);
+          console.log('[ANALYSIS PAGE] ✅ Loaded reviews from cache');
+        } catch (error) {
+          console.error('[ANALYSIS PAGE] Failed to parse reviews cache:', error);
+        }
+      } else {
+        console.log('[ANALYSIS PAGE] ⚠️ Reviews not in cache, fetching...');
+        setReviewsLoading(true);
+        fetch(`/api/places/reviews?placeId=${encodeURIComponent(placeId)}&all=true`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.error) throw new Error(data.error);
+            setReviews(data.reviews || []);
+            localStorage.setItem(`analysis_${scanId}_reviews`, JSON.stringify(data));
+          })
+          .catch(err => {
+            console.error('[ANALYSIS PAGE] Failed to fetch reviews:', err);
+            setReviewsError(err.message || 'Failed to fetch reviews');
+          })
+          .finally(() => setReviewsLoading(false));
+      }
+    }
+    
+    if (extractedWebsiteUrl && !loadedWebsite) {
+      console.log('[ANALYSIS PAGE] ⚠️ Website not in cache, triggering...');
+      setWebsiteLoading(true);
+      fetch("/api/scan/website", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: extractedWebsiteUrl, maxDepth: 2, maxPages: 10 }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          setWebsiteResult(data);
+          localStorage.setItem(`analysis_${scanId}_website`, JSON.stringify(data));
+        })
+        .catch(err => setWebsiteError(err.message || "An error occurred"))
+        .finally(() => setWebsiteLoading(false));
+    }
+    
+    if (igUsernameFromMeta && !loadedIg) {
+      console.log('[ANALYSIS PAGE] ⚠️ Instagram not in cache, triggering...');
+      setIgLoading(true);
+      fetch("/api/test/instagram-scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: igUsernameFromMeta }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          setIgResult(data);
+          localStorage.setItem(`analysis_${scanId}_instagram`, JSON.stringify(data));
+        })
+        .catch(err => setIgError(err.message || "An error occurred"))
+        .finally(() => setIgLoading(false));
+    }
+    
+    if (fbUsernameFromMeta && !loadedFb) {
+      console.log('[ANALYSIS PAGE] ⚠️ Facebook not in cache, triggering...');
+      setFbLoading(true);
+      fetch("/api/test/facebook-scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: fbUsernameFromMeta }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          setFbResult(data);
+          localStorage.setItem(`analysis_${scanId}_facebook`, JSON.stringify(data));
+        })
+        .catch(err => setFbError(err.message || "An error occurred"))
+        .finally(() => setFbLoading(false));
+    }
+  }, [scanId, placeId]);
 
   // Instagram submit handler
   const handleInstagramSubmit = async (e: React.FormEvent) => {
@@ -2993,6 +3232,176 @@ Example: Instead of just "restaurant", use "Italian restaurant" or "Seafood rest
             </div>
           )}
         </div>
+
+        {/* ================================================================= */}
+        {/* GOOGLE REVIEWS SECTION */}
+        {/* ================================================================= */}
+        {placeId && (
+          <div className="bg-white rounded-lg shadow-md p-8 mb-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">
+              📝 Google Reviews
+            </h2>
+
+            {reviewsLoading && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+                <div className="flex items-center gap-3">
+                  <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+                  <span className="text-blue-800">Loading reviews...</span>
+                </div>
+              </div>
+            )}
+
+            {reviewsError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold text-red-800 mb-2">❌ Error</h3>
+                <p className="text-red-600">{reviewsError}</p>
+              </div>
+            )}
+
+            {!reviewsLoading && !reviewsError && reviews.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No reviews found for this business.
+              </div>
+            )}
+
+            {!reviewsLoading && !reviewsError && reviews.length > 0 && (
+              <div className="space-y-4">
+                {reviews.map((review) => {
+                  const getInitials = (name: string) => {
+                    const parts = name.trim().split(" ");
+                    if (parts.length >= 2) {
+                      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+                    }
+                    return name.substring(0, 2).toUpperCase();
+                  };
+
+                  const renderStars = (rating: number) => {
+                    const fullStars = Math.floor(rating);
+                    const hasHalfStar = rating % 1 >= 0.5;
+                    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+
+                    return (
+                      <div className="flex items-center gap-0.5">
+                        {[...Array(fullStars)].map((_, i) => (
+                          <svg
+                            key={`full-${i}`}
+                            className="w-4 h-4 text-yellow-400 fill-current"
+                            viewBox="0 0 20 20"
+                          >
+                            <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
+                          </svg>
+                        ))}
+                        {hasHalfStar && (
+                          <svg
+                            className="w-4 h-4 text-yellow-400 fill-current"
+                            viewBox="0 0 20 20"
+                          >
+                            <defs>
+                              <linearGradient id={`half-fill-${review.reviewId}`}>
+                                <stop offset="50%" stopColor="currentColor" />
+                                <stop offset="50%" stopColor="transparent" stopOpacity="1" />
+                              </linearGradient>
+                            </defs>
+                            <path
+                              fill={`url(#half-fill-${review.reviewId})`}
+                              d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"
+                            />
+                          </svg>
+                        )}
+                        {[...Array(emptyStars)].map((_, i) => (
+                          <svg
+                            key={`empty-${i}`}
+                            className="w-4 h-4 text-gray-300 fill-current"
+                            viewBox="0 0 20 20"
+                          >
+                            <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
+                          </svg>
+                        ))}
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <div
+                      key={review.reviewId}
+                      className="border border-gray-200 rounded-lg p-6 hover:border-gray-300 transition-colors"
+                    >
+                      <div className="flex items-start gap-4">
+                        {/* Profile Photo */}
+                        <div className="flex-shrink-0 relative">
+                          {review.profilePhotoUrl ? (
+                            <div className="relative w-12 h-12 rounded-full overflow-hidden">
+                              <img
+                                src={review.profilePhotoUrl}
+                                alt={review.authorName}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = "none";
+                                  if (target.parentElement) {
+                                    target.parentElement.innerHTML = `
+                                      <div class="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold text-sm">
+                                        ${getInitials(review.authorName)}
+                                      </div>
+                                    `;
+                                  }
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold text-sm">
+                              {getInitials(review.authorName)}
+                            </div>
+                          )}
+                          {/* Local Guide Badge */}
+                          {review.isLocalGuide && (
+                            <div
+                              className="absolute w-4 h-4 bg-yellow-400 rounded-full ring-2 ring-white shadow-sm flex items-center justify-center"
+                              style={{
+                                bottom: '-2px',
+                                right: '-2px',
+                              }}
+                            >
+                              <svg
+                                className="w-2.5 h-2.5 text-white fill-current"
+                                viewBox="0 0 20 20"
+                              >
+                                <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Review Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-3 mb-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-lg font-semibold text-gray-900 mb-1">
+                                {review.authorName}
+                              </div>
+                              {review.relativeTime && (
+                                <div className="text-sm text-gray-500">
+                                  {review.relativeTime}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-shrink-0">
+                              {renderStars(review.rating)}
+                            </div>
+                          </div>
+
+                          <div className="text-gray-700 leading-relaxed">
+                            {review.text}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

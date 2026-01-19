@@ -2,9 +2,18 @@
  * Owner-style Query Builder
  * Generates non-branded, high-intent queries (category/service + neighborhood)
  * Similar to Owner.com's approach
+ * 
+ * Uses category families and strict service keyword validation to prevent generic queries
  */
 
 import type { BusinessIdentity } from '@/lib/business/resolveBusinessIdentity';
+import {
+  resolveCategoryFamily,
+  getAllowedServiceKeywords,
+  isBlockedKeyword,
+  filterServiceKeywordsByFamily,
+  type CategoryFamily,
+} from './categoryFamilies';
 
 export interface OwnerStyleQuery {
   query: string;
@@ -12,75 +21,126 @@ export interface OwnerStyleQuery {
   rationale: string;
 }
 
-// Category to search phrase mapping
+export interface QueryGenerationDebug {
+  category_family: CategoryFamily;
+  allowed_services_used: string[];
+  rejected_keywords: string[];
+  final_queries: string[];
+}
+
+// Category to search phrase mapping (fallback if family doesn't provide)
 const CATEGORY_PHRASES: Record<string, string> = {
   'Restaurant': 'restaurant',
   'Bar': 'bar',
   'Cafe': 'cafe',
   'Bakery': 'bakery',
-  'Hotel': 'hotel',
-  'Nightclub': 'nightclub',
   'Dentist': 'dentist',
+  'Orthodontist': 'orthodontist',
   'Law Firm': 'lawyer',
-  'Accounting Firm': 'accounting',
-  'Medical Practice': 'doctor',
-  'Hospital': 'hospital',
-  'Pharmacy': 'pharmacy',
+  'Plumber': 'plumber',
   'Gym': 'gym',
-  'Spa': 'spa',
   'Beauty Salon': 'beauty salon',
   'Hair Salon': 'hair salon',
-  'Car Dealership': 'car dealer',
-  'Auto Repair': 'auto repair',
-  'Electrician': 'electrician',
-  'Plumber': 'plumber',
-  'Roofing Contractor': 'roofing contractor',
-  'Contractor': 'contractor',
   'Real Estate Agency': 'real estate',
-  'Travel Agency': 'travel agency',
-  'Insurance Agency': 'insurance',
-  'Marketing Agency': 'marketing agency',
-  'Retail Store': 'store',
-  'Clothing Store': 'clothing store',
-  'Furniture Store': 'furniture store',
 };
 
-// Service intents for restaurants/cafes (only if detected on site)
-const RESTAURANT_SERVICE_INTENTS = [
-  'brunch', 'breakfast', 'cocktails', 'tapas', 'seafood', 'pizza',
-  'sushi', 'italian', 'french', 'mediterranean', 'steakhouse',
-];
-
-// Generic words to reject
-const REJECTED_KEYWORDS = new Set([
-  'home', 'welcome', 'contact', 'login', 'signup', 'privacy', 'terms',
-  'booking', 'menu', 'about', 'page', 'site', 'website',
-]);
+/**
+ * Check if a query contains blocked terms
+ * Returns array of blocked terms found
+ */
+function findBlockedTermsInQuery(query: string): string[] {
+  const lower = query.toLowerCase();
+  const words = lower.split(/\s+/);
+  const found: string[] = [];
+  
+  for (const word of words) {
+    if (isBlockedKeyword(word)) {
+      found.push(word);
+    }
+  }
+  
+  return found;
+}
 
 /**
- * Check if a keyword is valid for queries
+ * Check if a query contains any allowed service keywords
  */
-function isValidKeyword(keyword: string): boolean {
-  const lower = keyword.toLowerCase().trim();
-  if (lower.length < 3) return false;
-  if (REJECTED_KEYWORDS.has(lower)) return false;
-  if (/^\d+$/.test(lower)) return false; // pure numbers
+function queryContainsAllowedService(query: string, allowedServices: string[]): boolean {
+  const lower = query.toLowerCase();
+  return allowedServices.some(service => {
+    const serviceLower = service.toLowerCase();
+    return lower === serviceLower || 
+           lower.includes(serviceLower) || 
+           serviceLower.includes(lower);
+  });
+}
+
+/**
+ * Validate a query - reject if it contains blocked terms without allowed services
+ */
+function isValidQuery(query: string, allowedServices: string[]): boolean {
+  const lower = query.toLowerCase().trim();
+  
+  // Must have at least 3 meaningful tokens
+  const tokens = lower.split(/\s+/).filter(t => t.length >= 2);
+  if (tokens.length < 3) return false;
+  
+  // Check if it contains blocked terms
+  const blockedTerms = findBlockedTermsInQuery(lower);
+  if (blockedTerms.length > 0) {
+    // Only allow if it also contains an allowed service keyword
+    // e.g., "orthodontic consultation" is OK, but "best consultation" is not
+    return queryContainsAllowedService(lower, allowedServices);
+  }
+  
   return true;
 }
 
 /**
- * Build Owner-style queries
+ * Build Owner-style queries with strict family-based validation
  */
 export function buildOwnerStyleQueries(params: {
   identity: BusinessIdentity;
   maxQueries?: number;
   detectedServiceIntents?: string[]; // e.g., ['brunch', 'cocktails'] from site content
+  placeTypes?: string[]; // Google Places types for better family resolution
 }): OwnerStyleQuery[] {
-  const { identity, maxQueries = 12, detectedServiceIntents = [] } = params;
+  const { identity, maxQueries = 12, detectedServiceIntents = [], placeTypes = [] } = params;
   const queries: OwnerStyleQuery[] = [];
   const seen = new Set<string>();
+  const rejected: string[] = [];
   
   const { business_name, category_label, location_suburb, location_city, service_keywords } = identity;
+  
+  // Resolve category family
+  const family = resolveCategoryFamily(category_label, placeTypes);
+  const allowedServices = getAllowedServiceKeywords(family);
+  
+  // Filter service keywords by family
+  const { allowed: allowedServiceKeywords, rejected: rejectedKeywords } = filterServiceKeywordsByFamily(
+    service_keywords,
+    family
+  );
+  rejected.push(...rejectedKeywords);
+  
+  // Also check detected service intents
+  const { allowed: allowedDetected, rejected: rejectedDetected } = filterServiceKeywordsByFamily(
+    detectedServiceIntents,
+    family
+  );
+  rejected.push(...rejectedDetected);
+  
+  // Combine allowed services (prefer family keywords, then detected, then identity)
+  const finalAllowedServices = [
+    ...allowedServices.slice(0, 5), // Top 5 from family
+    ...allowedServiceKeywords,
+    ...allowedDetected,
+  ];
+  
+  // Deduplicate
+  const uniqueAllowedServices = Array.from(new Set(finalAllowedServices.map(s => s.toLowerCase())))
+    .map(s => finalAllowedServices.find(orig => orig.toLowerCase() === s)!)
+    .slice(0, 8); // Max 8 service keywords
   
   // Determine location to use (prefer suburb, fallback to city)
   const location = location_suburb || location_city;
@@ -99,80 +159,74 @@ export function buildOwnerStyleQueries(params: {
   }
   
   // =========================================================================
-  // A) NON-BRANDED CORE (Primary - category + neighborhood)
+  // A) NON-BRANDED CORE (Primary - service + neighborhood)
   // =========================================================================
   
-  const categoryPhrase = CATEGORY_PHRASES[category_label] || category_label.toLowerCase();
-  
-  if (categoryPhrase && categoryPhrase !== 'business') {
-    // Core category queries
-    const addQuery = (q: string, rationale: string) => {
-      const normalized = q.toLowerCase().trim();
-      if (!seen.has(normalized) && q.split(/\s+/).length >= 3) {
-        seen.add(normalized);
-        queries.push({ query: q.trim(), intent: 'non_branded', rationale });
-      }
-    };
-    
-    addQuery(`best ${categoryPhrase} in ${location}`, `Best + category + ${location_suburb ? 'suburb' : 'city'}`);
-    addQuery(`${categoryPhrase} in ${location}`, `Category + ${location_suburb ? 'suburb' : 'city'}`);
-    addQuery(`${categoryPhrase} ${location}`, `Category + ${location_suburb ? 'suburb' : 'city'} (no preposition)`);
-    
-    // If we have suburb, also try city-level
-    if (location_suburb && location_city && location_suburb !== location_city) {
-      addQuery(`best ${categoryPhrase} in ${location_city}`, `Best + category + city`);
-      addQuery(`${categoryPhrase} ${location_city}`, `Category + city`);
-    }
-  }
-  
-  // =========================================================================
-  // B) NON-BRANDED SECONDARY (Service intents)
-  // =========================================================================
-  
-  // Use detected service intents from site content
-  const validServiceIntents = detectedServiceIntents
-    .filter(kw => isValidKeyword(kw) && kw.length >= 3)
-    .slice(0, 4);
-  
-  // Also check service keywords from identity
-  for (const kw of service_keywords) {
-    if (validServiceIntents.length >= 4) break;
-    const lower = kw.toLowerCase();
-    if (isValidKeyword(kw) && !validServiceIntents.includes(lower)) {
-      // Check if it's a restaurant/cafe service intent
-      if (['Restaurant', 'Bar', 'Cafe'].includes(category_label)) {
-        if (RESTAURANT_SERVICE_INTENTS.some(intent => lower.includes(intent) || intent.includes(lower))) {
-          validServiceIntents.push(lower);
-        }
-      } else {
-        // For other businesses, use service keywords that aren't generic
-        validServiceIntents.push(lower);
-      }
-    }
-  }
-  
-  // Build service intent queries
-  for (const serviceIntent of validServiceIntents) {
+  // Use allowed services from family
+  for (const service of uniqueAllowedServices.slice(0, 5)) {
     if (queries.length >= maxQueries - 3) break; // Reserve 3 for branded
     
-    const addServiceQuery = (q: string, rationale: string) => {
+    const addQuery = (q: string, rationale: string) => {
       const normalized = q.toLowerCase().trim();
-      if (!seen.has(normalized) && q.split(/\s+/).length >= 3) {
+      if (!seen.has(normalized) && isValidQuery(q, uniqueAllowedServices)) {
         seen.add(normalized);
         queries.push({ query: q.trim(), intent: 'non_branded', rationale });
+      } else if (!seen.has(normalized)) {
+        rejected.push(`Query rejected: "${q}" (contains blocked terms or invalid)`);
       }
     };
     
-    addServiceQuery(`best ${serviceIntent} in ${location}`, `Best + service "${serviceIntent}" + location`);
-    addServiceQuery(`${serviceIntent} ${location}`, `Service "${serviceIntent}" + location`);
+    // Service + suburb (most specific)
+    if (location_suburb) {
+      addQuery(`${service} in ${location_suburb}`, `Service "${service}" + suburb`);
+      addQuery(`best ${service} in ${location_suburb}`, `Best + service "${service}" + suburb`);
+    }
     
-    if (location_suburb && location_city && location_suburb !== location_city) {
-      addServiceQuery(`${serviceIntent} ${location_city}`, `Service "${serviceIntent}" + city`);
+    // Service + city
+    if (location_city) {
+      addQuery(`${service} ${location_city}`, `Service "${service}" + city`);
+      if (location_suburb && location_suburb !== location_city) {
+        addQuery(`best ${service} in ${location_city}`, `Best + service "${service}" + city`);
+      }
+    }
+  }
+  
+  // Fallback: if no allowed services, use category phrase (but still validate)
+  // Only use if category phrase is in allowed services for the family
+  if (queries.length === 0 && category_label) {
+    const categoryPhrase = CATEGORY_PHRASES[category_label] || category_label.toLowerCase();
+    
+    // Check if category phrase is in allowed services for this family
+    const categoryInAllowed = uniqueAllowedServices.some(s => 
+      s.toLowerCase() === categoryPhrase.toLowerCase() || 
+      categoryPhrase.toLowerCase().includes(s.toLowerCase())
+    );
+    
+    if (categoryPhrase && categoryPhrase !== 'business' && !isBlockedKeyword(categoryPhrase) && categoryInAllowed) {
+      const addQuery = (q: string, rationale: string) => {
+        const normalized = q.toLowerCase().trim();
+        if (!seen.has(normalized) && isValidQuery(q, uniqueAllowedServices)) {
+          seen.add(normalized);
+          queries.push({ query: q.trim(), intent: 'non_branded', rationale });
+        } else if (!seen.has(normalized)) {
+          rejected.push(`Query rejected: "${q}" (contains blocked terms or invalid)`);
+        }
+      };
+      
+      if (location_suburb) {
+        addQuery(`best ${categoryPhrase} in ${location_suburb}`, `Best + category + suburb`);
+        addQuery(`${categoryPhrase} in ${location_suburb}`, `Category + suburb`);
+      }
+      if (location_city) {
+        addQuery(`${categoryPhrase} ${location_city}`, `Category + city`);
+      }
+    } else if (categoryPhrase && isBlockedKeyword(categoryPhrase)) {
+      rejected.push(`Category phrase "${categoryPhrase}" is blocked`);
     }
   }
   
   // =========================================================================
-  // C) BRANDED (Minimal - max 3)
+  // B) BRANDED (Minimal - max 3)
   // =========================================================================
   
   if (business_name && business_name.length > 2) {
@@ -191,5 +245,41 @@ export function buildOwnerStyleQueries(params: {
     addBranded(`${business_name} reviews`, 'Brand reviews');
   }
   
-  return queries.slice(0, maxQueries);
+  // Final validation pass - remove any queries that slipped through
+  const validatedQueries = queries.filter(q => {
+    if (q.intent === 'branded') return true; // Branded queries are always OK
+    
+    // For non-branded, must pass validation
+    if (!isValidQuery(q.query, uniqueAllowedServices)) {
+      rejected.push(`Final validation rejected: "${q.query}"`);
+      return false;
+    }
+    return true;
+  });
+  
+  return validatedQueries.slice(0, maxQueries);
+}
+
+/**
+ * Get debug info for query generation
+ */
+export function getQueryGenerationDebug(params: {
+  identity: BusinessIdentity;
+  placeTypes?: string[];
+}): QueryGenerationDebug {
+  const { identity, placeTypes = [] } = params;
+  const family = resolveCategoryFamily(identity.category_label, placeTypes);
+  const { allowed, rejected } = filterServiceKeywordsByFamily(identity.service_keywords, family);
+  
+  const queries = buildOwnerStyleQueries({
+    identity,
+    placeTypes,
+  });
+  
+  return {
+    category_family: family,
+    allowed_services_used: allowed,
+    rejected_keywords: rejected,
+    final_queries: queries.map(q => q.query),
+  };
 }

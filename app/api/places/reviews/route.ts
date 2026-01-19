@@ -130,6 +130,7 @@ function selectReviewVariety(reviews: NormalizedReview[]): NormalizedReview[] {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const placeId = searchParams.get("placeId");
+  const returnAll = searchParams.get("all") === "true"; // Optional parameter to return all reviews
 
   if (!placeId) {
     return NextResponse.json(
@@ -192,13 +193,13 @@ export async function GET(request: NextRequest) {
             index === self.findIndex((r) => r.reviewId === review.reviewId)
           );
     
-    // Select 5 reviews with rating variety
-    const selectedReviews = selectReviewVariety(normalizedReviews);
+    // Return all reviews if requested, otherwise select 5 with rating variety
+    const reviewsToReturn = returnAll ? normalizedReviews : selectReviewVariety(normalizedReviews);
 
     return NextResponse.json({
       placeId,
       name: result.name || "",
-      reviews: selectedReviews,
+      reviews: reviewsToReturn,
     });
   } catch (error) {
     console.error("Error fetching place reviews:", error);

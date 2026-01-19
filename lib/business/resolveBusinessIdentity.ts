@@ -11,6 +11,11 @@ import {
   getBestBusinessName,
   type NormalizedCandidate,
 } from './normalizeBusinessName';
+import {
+  resolveCategoryFamily,
+  filterServiceKeywordsByFamily,
+  getAllowedServiceKeywords,
+} from '@/lib/seo/categoryFamilies';
 
 // Types
 export interface BusinessIdentity {
@@ -24,6 +29,7 @@ export interface BusinessIdentity {
   location_country: string | null;
   latlng: { lat: number; lng: number } | null;
   place_id: string | null;
+  place_types: string[]; // Google Places types for category family resolution
   rating: number | null;
   review_count: number;
   sources: {
@@ -393,6 +399,7 @@ export async function resolveBusinessIdentity(params: {
     location_country: null,
     latlng: null,
     place_id: null,
+    place_types: [],
     rating: null,
     review_count: 0,
     sources: { gbp: false, places: false, website: false },
@@ -525,8 +532,10 @@ export async function resolveBusinessIdentity(params: {
               }
               
               if (fullPlace.types) {
+                result.place_types = fullPlace.types;
                 result.category_label = getCategoryFromTypes(fullPlace.types);
                 debug.push(`Category from types: ${result.category_label}`);
+                debug.push(`Place types: ${fullPlace.types.join(', ')}`);
               }
               
               // Parse address
@@ -627,11 +636,28 @@ export async function resolveBusinessIdentity(params: {
       debug.push(`Location from website: ${result.location_label}`);
     }
     
-    // Service keywords
-    result.service_keywords = filterServiceKeywords([
+    // Service keywords - prefer family-based filtering if we have category/place types
+    const rawKeywords = filterServiceKeywords([
       ...websiteData.serviceKeywords,
       ...websiteData.topPhrases,
     ]);
+    
+    // If we have category or place types, filter by family
+    if (result.category_label || result.place_types.length > 0) {
+      const family = resolveCategoryFamily(result.category_label, result.place_types);
+      const { allowed } = filterServiceKeywordsByFamily(rawKeywords, family);
+      
+      // Prefer family-allowed keywords, but also include top family keywords
+      const familyKeywords = getAllowedServiceKeywords(family).slice(0, 5);
+      result.service_keywords = [
+        ...familyKeywords,
+        ...allowed,
+      ].slice(0, 8);
+      
+      debug.push(`Service keywords filtered by family "${family}": ${result.service_keywords.length} allowed`);
+    } else {
+      result.service_keywords = rawKeywords;
+    }
     
     // Category guess from website
     const allText = [
@@ -688,20 +714,39 @@ export async function resolveBusinessIdentity(params: {
     result.confidence = 'low';
   }
   
-  // Ensure we have at least some service keywords
+  // Ensure we have at least some service keywords (with family filtering)
   if (result.service_keywords.length === 0 && websiteData) {
-    result.service_keywords = filterServiceKeywords([
+    const rawKeywords = filterServiceKeywords([
       ...websiteData.serviceKeywords,
       ...websiteData.topPhrases,
     ]);
+    
+    if (result.category_label || result.place_types.length > 0) {
+      const family = resolveCategoryFamily(result.category_label, result.place_types);
+      const { allowed } = filterServiceKeywordsByFamily(rawKeywords, family);
+      const familyKeywords = getAllowedServiceKeywords(family).slice(0, 5);
+      result.service_keywords = [
+        ...familyKeywords,
+        ...allowed,
+      ].slice(0, 8);
+    } else {
+      result.service_keywords = rawKeywords;
+    }
   }
   
-  // Add category to service keywords if not already there
+  // Add category-derived service keywords from family if not already there
   if (result.category_label && result.category_label !== 'Business') {
-    const catLower = result.category_label.toLowerCase();
-    if (!result.service_keywords.some(kw => kw.toLowerCase().includes(catLower))) {
-      result.service_keywords.unshift(result.category_label.toLowerCase());
+    const family = resolveCategoryFamily(result.category_label, result.place_types);
+    const familyKeywords = getAllowedServiceKeywords(family).slice(0, 3);
+    
+    for (const fkw of familyKeywords) {
+      const lower = fkw.toLowerCase();
+      if (!result.service_keywords.some(kw => kw.toLowerCase().includes(lower))) {
+        result.service_keywords.unshift(fkw);
+      }
     }
+    
+    result.service_keywords = result.service_keywords.slice(0, 8);
   }
   
   debug.push(`Final identity: ${result.business_name} (${result.confidence} confidence)`);

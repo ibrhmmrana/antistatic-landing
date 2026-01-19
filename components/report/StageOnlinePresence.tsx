@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ScanLineOverlay from "./ScanLineOverlay";
 
 interface SocialScreenshot {
   platform: string;
   url: string;
   screenshot: string | null;
-  status: 'pending' | 'loading' | 'success' | 'error';
+  status: 'pending' | 'loading' | 'success' | 'error' | 'detected';
 }
 
 interface OnlinePresenceData {
@@ -32,6 +32,8 @@ interface StageOnlinePresenceProps {
   address: string;
   scanId: string;
   initialData?: InitialOnlinePresenceData | null;
+  allAnalyzersComplete?: boolean;
+  onComplete?: () => void;
 }
 
 export default function StageOnlinePresence({
@@ -39,19 +41,32 @@ export default function StageOnlinePresence({
   address,
   scanId,
   initialData,
+  allAnalyzersComplete = false,
+  onComplete,
 }: StageOnlinePresenceProps) {
   const [data, setData] = useState<OnlinePresenceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [screenshotError, setScreenshotError] = useState(false);
+  const hasCalledOnComplete = useRef(false);
 
   // Use initialData from parent if available (primary source - avoids serverless cache issues)
+  // This effect MUST run every time initialData changes to pick up new screenshots
   useEffect(() => {
     if (initialData) {
-      console.log('[StageOnlinePresence] Using initialData from parent:', {
+      // Log detailed info about each social link's screenshot status
+      const socialLinksDebug = (initialData.socialLinks || []).map(link => ({
+        platform: link.platform,
+        hasScreenshot: !!link.screenshot,
+        screenshotLength: link.screenshot?.length || 0,
+        url: link.url,
+      }));
+      
+      console.log('[StageOnlinePresence] Received initialData update:', {
         hasWebsiteScreenshot: !!initialData.websiteScreenshot,
         websiteUrl: initialData.websiteUrl,
         socialLinksCount: initialData.socialLinks?.length || 0,
+        socialLinksDetail: socialLinksDebug,
       });
       
       const completeData: OnlinePresenceData = {
@@ -61,15 +76,32 @@ export default function StageOnlinePresence({
           platform: link.platform,
           url: link.url,
           screenshot: link.screenshot,
-          status: link.screenshot ? 'success' : 'pending',
+          // Mark as 'detected' if no screenshot but URL exists (platform was found)
+          status: link.screenshot ? 'success' : (link.url ? 'detected' : 'pending'),
         })),
       };
       
+      // Always update data state when initialData changes (including new screenshots)
       setData(completeData);
       setLoading(false);
+      
+      // Check if all screenshots are ready (or failed but detected)
+      const websiteReady = initialData.websiteScreenshot || initialData.websiteUrl;
+      const socialsReady = !initialData.socialLinks?.length || 
+        initialData.socialLinks.every((link: any) => link.screenshot || link.url);
+      
+      // Only call onComplete when screenshots are ready AND analyzers are complete
+      if (websiteReady && socialsReady && allAnalyzersComplete && onComplete && !hasCalledOnComplete.current) {
+        hasCalledOnComplete.current = true;
+        console.log('[StageOnlinePresence] Screenshots ready + analyzers complete, calling onComplete...');
+        setTimeout(() => {
+          onComplete();
+        }, 3000); // Shorter delay since we waited for analyzers
+      }
+      
       return; // Don't fetch from API if we have data
     }
-  }, [initialData]);
+  }, [initialData, allAnalyzersComplete, onComplete]);
 
   // Fallback: fetch from API if no initialData (e.g., page refresh)
   useEffect(() => {
@@ -165,12 +197,27 @@ export default function StageOnlinePresence({
             platform: link.platform,
             url: link.url,
             screenshot: link.screenshot || null,
-            status: link.screenshot ? 'success' : 'pending',
+            // Mark as 'detected' if no screenshot but URL exists
+            status: link.screenshot ? 'success' : (link.url ? 'detected' : 'pending'),
           })),
         };
 
         setData(completeData);
         setLoading(false);
+        
+        // Check if all screenshots are ready (or detected)
+        const websiteReady = websiteScreenshot || websiteUrl;
+        const socialsReady = !result.socialLinks?.length || 
+          result.socialLinks.every((link: any) => link.screenshot || link.url);
+        
+        // Only call onComplete when screenshots are ready AND analyzers are complete
+        if (websiteReady && socialsReady && allAnalyzersComplete && onComplete && !hasCalledOnComplete.current) {
+          hasCalledOnComplete.current = true;
+          console.log('[StageOnlinePresence] Screenshots ready + analyzers complete (fallback), calling onComplete...');
+          setTimeout(() => {
+            onComplete();
+          }, 3000);
+        }
       } catch (err) {
         console.error('Error fetching online presence data:', err);
         // If it's just waiting, don't show a hard error yet
@@ -193,7 +240,50 @@ export default function StageOnlinePresence({
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [scanId, businessName, address, loading, data, initialData]);
+  }, [scanId, businessName, address, loading, data, initialData, allAnalyzersComplete, onComplete]);
+
+  // Watch for allAnalyzersComplete to become true (handles case where screenshots loaded first)
+  useEffect(() => {
+    if (hasCalledOnComplete.current || !allAnalyzersComplete || !onComplete) return;
+    
+    // Check if screenshots are ready
+    const currentData = data || (initialData ? {
+      websiteUrl: initialData.websiteUrl,
+      websiteScreenshot: initialData.websiteScreenshot,
+      socialLinks: initialData.socialLinks || [],
+    } : null);
+    
+    if (!currentData) {
+      // Even if no data, if analyzers are complete, we should proceed
+      // (might be a business with no online presence)
+      hasCalledOnComplete.current = true;
+      console.log('[StageOnlinePresence] Analyzers complete, no online presence data, calling onComplete...');
+      setTimeout(() => {
+        onComplete();
+      }, 2000);
+      return;
+    }
+    
+    const websiteReady = currentData.websiteScreenshot || currentData.websiteUrl;
+    const socialsReady = !currentData.socialLinks?.length || 
+      currentData.socialLinks.every((link: any) => link.screenshot || link.url);
+    
+    if (websiteReady && socialsReady) {
+      hasCalledOnComplete.current = true;
+      console.log('[StageOnlinePresence] Analyzers became complete, screenshots ready, calling onComplete...');
+      setTimeout(() => {
+        onComplete();
+      }, 3000);
+    } else {
+      console.log('[StageOnlinePresence] Analyzers complete but screenshots not ready yet...', {
+        websiteReady,
+        socialsReady,
+        hasWebsite: !!currentData.websiteUrl,
+        hasScreenshot: !!currentData.websiteScreenshot,
+        socialLinksCount: currentData.socialLinks?.length || 0,
+      });
+    }
+  }, [allAnalyzersComplete, data, initialData, onComplete]);
 
   // Poll for individual screenshot updates (so Facebook can display before Instagram completes)
   useEffect(() => {
@@ -346,6 +436,19 @@ export default function StageOnlinePresence({
     const [isVisible, setIsVisible] = useState(false);
     const [imageLoaded, setImageLoaded] = useState(false);
     
+    // Debug logging for screenshot state
+    useEffect(() => {
+      console.log(`[SocialScreenshot ${platform}] Render state:`, {
+        hasScreenshot: !!screenshot,
+        screenshotLength: screenshot?.length || 0,
+        hasUrl: !!url,
+        hasError,
+        isLoading,
+        isVisible,
+        imageLoaded,
+      });
+    }, [screenshot, platform, url, hasError, isLoading, isVisible, imageLoaded]);
+    
     // Show mockup immediately when we have URL, animate screenshot when it arrives
     useEffect(() => {
       if (url) {
@@ -487,14 +590,16 @@ export default function StageOnlinePresence({
   const hasInstagram = !!(instagramLink?.url); // Changed: show if URL exists
   const hasFacebook = !!(facebookLink?.url); // Changed: show if URL exists
   
-  // Track if screenshots are still loading (URL exists but no screenshot yet, and not explicitly failed)
-  // Note: status 'pending' means we're still waiting for screenshot
+  // Track if screenshots are still loading (URL exists but no screenshot yet, status is 'pending')
   const instagramIsLoading = !!(instagramLink?.url && !instagramLink?.screenshot && instagramLink?.status === 'pending');
   const facebookIsLoading = !!(facebookLink?.url && !facebookLink?.screenshot && facebookLink?.status === 'pending');
   
-  // Track if screenshots failed (URL exists but no screenshot and status is error)
-  const instagramScreenshotFailed = !!(instagramLink?.url && !instagramLink?.screenshot && instagramLink?.status === 'error');
-  const facebookScreenshotFailed = !!(facebookLink?.url && !facebookLink?.screenshot && facebookLink?.status === 'error');
+  // Track if screenshots failed or were detected but couldn't be captured
+  // 'error' = explicit failure, 'detected' = platform found but screenshot failed
+  const instagramScreenshotFailed = !!(instagramLink?.url && !instagramLink?.screenshot && 
+    (instagramLink?.status === 'error' || instagramLink?.status === 'detected'));
+  const facebookScreenshotFailed = !!(facebookLink?.url && !facebookLink?.screenshot && 
+    (facebookLink?.status === 'error' || facebookLink?.status === 'detected'));
   
   // Count available items (website or social links with URL)
   const screenshotCount = [hasWebsite, hasInstagram, hasFacebook].filter(Boolean).length;

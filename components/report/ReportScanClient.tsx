@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2, Check, Circle } from "lucide-react";
 import StageCompetitorMap from "./StageCompetitorMap";
 import StageGoogleBusinessProfile from "./StageGoogleBusinessProfile";
@@ -37,12 +38,25 @@ export default function ReportScanClient({
   name,
   addr,
 }: ReportScanClientProps) {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [placeDetails, setPlaceDetails] = useState<PlaceDetails | null>(null);
   const [onlinePresenceData, setOnlinePresenceData] = useState<OnlinePresenceResult | null>(null);
   const scraperTriggeredRef = useRef(false); // Prevent duplicate scraper triggers
-
   const websiteScreenshotTriggeredRef = useRef(false); // Prevent duplicate website screenshot triggers
+  const stage4AutoProgressRef = useRef(false); // Track if we've already auto-progressed from stage 4
+  const analyzersTriggeredRef = useRef(false); // Prevent duplicate analyzer triggers
+  const igScraperStartedRef = useRef(false); // Prevent duplicate Instagram scraper starts
+  const fbScraperStartedRef = useRef(false); // Prevent duplicate Facebook scraper starts
+  
+  // Track analyzer completion status
+  const [analyzersComplete, setAnalyzersComplete] = useState({
+    gbp: false,
+    website: false,
+    instagram: false,
+    facebook: false,
+  });
+  const [allAnalyzersComplete, setAllAnalyzersComplete] = useState(false);
 
   // Fetch place details on mount and trigger website screenshot immediately
   useEffect(() => {
@@ -178,10 +192,17 @@ export default function ReportScanClient({
           
           // Store the FULL result in React state for immediate access by StageOnlinePresence
           // This is the key fix: serverless API cache is volatile, so we keep data in React state
+          const socialLinksDebug = (result.socialLinks || []).map((link: any) => ({
+            platform: link.platform,
+            hasScreenshot: !!link.screenshot,
+            screenshotLength: link.screenshot?.length || 0,
+            url: link.url,
+          }));
           console.log('[SCRAPER] ✅ Result received, storing in React state:', {
             hasWebsiteScreenshot: !!result.websiteScreenshot,
             websiteUrl: result.websiteUrl,
             socialLinksCount: result.socialLinks?.length || 0,
+            socialLinksDetail: socialLinksDebug,
           });
           
           setOnlinePresenceData(prev => ({
@@ -228,6 +249,320 @@ export default function ReportScanClient({
       triggerScraper();
     }
   }, [placeId, name, addr, scanId]);
+
+  // Trigger all analyzers during onboarding (runs in background, stores results in localStorage)
+  useEffect(() => {
+    if (analyzersTriggeredRef.current) return; // Already triggered
+    
+    const triggerAnalyzers = async () => {
+      analyzersTriggeredRef.current = true;
+      console.log('[ANALYZERS] Starting background analysis during onboarding...');
+      
+      const promises: Promise<void>[] = [];
+      
+      // 1. GBP Analyzer - trigger immediately when placeId is available
+      if (placeId) {
+        const gbpCacheKey = `analysis_${scanId}_gbp`;
+        const existingGbp = localStorage.getItem(gbpCacheKey);
+        if (existingGbp) {
+          setAnalyzersComplete(prev => ({ ...prev, gbp: true }));
+        } else {
+          promises.push((async () => {
+            try {
+              console.log('[ANALYZERS] Triggering GBP analyzer...');
+              const response = await fetch(`/api/gbp/place-details?place_id=${encodeURIComponent(placeId)}`);
+              if (response.ok) {
+                const data = await response.json();
+                localStorage.setItem(gbpCacheKey, JSON.stringify(data));
+                console.log('[ANALYZERS] ✅ GBP analyzer complete');
+              }
+            } catch (error) {
+              console.error('[ANALYZERS] ❌ GBP analyzer failed:', error);
+            } finally {
+              setAnalyzersComplete(prev => ({ ...prev, gbp: true }));
+            }
+          })());
+        }
+      } else {
+        setAnalyzersComplete(prev => ({ ...prev, gbp: true })); // No GBP to analyze
+      }
+      
+      // 2. Website Crawler - trigger when website URL is found
+      const checkWebsiteUrl = async () => {
+        let websiteUrl: string | null = null;
+        
+        // Try to get from placeDetails
+        if (placeDetails?.website) {
+          websiteUrl = placeDetails.website;
+        } else {
+          // Fetch place details if not available
+          try {
+            const response = await fetch(`/api/places/details?placeId=${encodeURIComponent(placeId)}`);
+            if (response.ok) {
+              const data = await response.json();
+              websiteUrl = data.website || null;
+            }
+          } catch (error) {
+            console.warn('[ANALYZERS] Failed to fetch website URL:', error);
+          }
+        }
+        
+        // Also check onlinePresenceData
+        if (!websiteUrl && onlinePresenceData?.websiteUrl) {
+          websiteUrl = onlinePresenceData.websiteUrl;
+        }
+        
+        // Also check localStorage
+        if (!websiteUrl) {
+          const onlinePresenceMetadata = localStorage.getItem(`onlinePresence_${scanId}`);
+          if (onlinePresenceMetadata) {
+            const parsed = JSON.parse(onlinePresenceMetadata);
+            websiteUrl = parsed.websiteUrl || null;
+          }
+        }
+        
+        if (websiteUrl) {
+          const websiteCacheKey = `analysis_${scanId}_website`;
+          const existingWebsite = localStorage.getItem(websiteCacheKey);
+          if (existingWebsite) {
+            setAnalyzersComplete(prev => ({ ...prev, website: true }));
+          } else {
+            try {
+              console.log('[ANALYZERS] Triggering website crawler...');
+              const response = await fetch("/api/scan/website", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                  url: websiteUrl, 
+                  maxDepth: 2,
+                  maxPages: 10 
+                }),
+              });
+              if (response.ok) {
+                const data = await response.json();
+                localStorage.setItem(websiteCacheKey, JSON.stringify(data));
+                console.log('[ANALYZERS] ✅ Website crawler complete');
+              }
+            } catch (error) {
+              console.error('[ANALYZERS] ❌ Website crawler failed:', error);
+            } finally {
+              setAnalyzersComplete(prev => ({ ...prev, website: true }));
+            }
+          }
+        } else {
+          setAnalyzersComplete(prev => ({ ...prev, website: true })); // No website to analyze
+        }
+      };
+      
+      // 3. Social Scrapers - check and trigger only if not already started by the dedicated effect
+      const checkSocialLinks = (socialLinks?: Array<{ platform: string; url: string }>) => {
+        // Use provided socialLinks or get from localStorage
+        let linksToCheck = socialLinks;
+        if (!linksToCheck) {
+          const onlinePresenceMetadata = localStorage.getItem(`onlinePresence_${scanId}`);
+          if (onlinePresenceMetadata) {
+            const parsed = JSON.parse(onlinePresenceMetadata);
+            linksToCheck = parsed.socialLinks;
+          }
+        }
+        
+        if (!linksToCheck || linksToCheck.length === 0) {
+          // No social links, mark both as complete
+          setAnalyzersComplete(prev => ({ ...prev, instagram: true, facebook: true }));
+          return;
+        }
+        
+        // Check if we have Instagram/Facebook links
+        const hasInstagram = linksToCheck.some((l: any) => l.platform === 'instagram');
+        const hasFacebook = linksToCheck.some((l: any) => l.platform === 'facebook');
+        
+        // Mark as complete if no links exist
+        if (!hasInstagram) setAnalyzersComplete(prev => ({ ...prev, instagram: true }));
+        if (!hasFacebook) setAnalyzersComplete(prev => ({ ...prev, facebook: true }));
+        
+        // NOTE: Actual scraper triggering is handled by the dedicated useEffect that watches
+        // onlinePresenceData - this function just marks complete when there are no links
+        // The refs (igScraperStartedRef, fbScraperStartedRef) prevent duplicate triggers
+        console.log('[ANALYZERS] checkSocialLinks called, scrapers managed by dedicated effect');
+      };
+      
+      // Check website URL immediately, then check for social links
+      checkWebsiteUrl();
+      
+      // Check social links immediately from onlinePresenceData (React state)
+      if (onlinePresenceData?.socialLinks && onlinePresenceData.socialLinks.length > 0) {
+        console.log('[ANALYZERS] Social links found in React state, triggering scrapers immediately...');
+        checkSocialLinks(onlinePresenceData.socialLinks.map(l => ({ platform: l.platform, url: l.url })));
+      } else {
+        // Poll for social links (they become available after scraper completes)
+        const socialLinksInterval = setInterval(() => {
+          // Check React state first (fastest)
+          if (onlinePresenceData?.socialLinks && onlinePresenceData.socialLinks.length > 0) {
+            clearInterval(socialLinksInterval);
+            console.log('[ANALYZERS] Social links found in React state (polling), triggering scrapers...');
+            checkSocialLinks(onlinePresenceData.socialLinks.map(l => ({ platform: l.platform, url: l.url })));
+            return;
+          }
+          
+          // Fallback to localStorage
+          const onlinePresenceMetadata = localStorage.getItem(`onlinePresence_${scanId}`);
+          if (onlinePresenceMetadata) {
+            const parsed = JSON.parse(onlinePresenceMetadata);
+            if (parsed.completed && parsed.socialLinks) {
+              clearInterval(socialLinksInterval);
+              console.log('[ANALYZERS] Social links found in localStorage (polling), triggering scrapers...');
+              checkSocialLinks();
+            }
+          }
+        }, 1000); // Check every 1 second for faster response
+        
+        // Fallback: Mark social analyzers as complete after 60 seconds if not already done
+        setTimeout(() => {
+          clearInterval(socialLinksInterval);
+          setAnalyzersComplete(prev => {
+            if (!prev.instagram || !prev.facebook) {
+              console.log('[ANALYZERS] Fallback timeout - marking social analyzers as complete');
+            }
+            return { ...prev, instagram: true, facebook: true };
+          });
+        }, 60000);
+      }
+      
+      // Run GBP analyzer immediately (doesn't depend on other data)
+      await Promise.allSettled(promises);
+      console.log('[ANALYZERS] All analyzers triggered');
+    };
+    
+    // Trigger analyzers after a short delay to allow placeDetails to load
+    const timeout = setTimeout(() => {
+      triggerAnalyzers();
+    }, 1000);
+    
+    return () => clearTimeout(timeout);
+  }, [placeId, scanId, placeDetails, onlinePresenceData]);
+  
+  // Watch for onlinePresenceData changes and trigger social scrapers IMMEDIATELY (in parallel)
+  // This runs independently of the main analyzer effect to ensure scrapers start ASAP
+  useEffect(() => {
+    if (!onlinePresenceData?.socialLinks || onlinePresenceData.socialLinks.length === 0) {
+      return;
+    }
+    
+    console.log('[SCRAPERS] onlinePresenceData has social links, triggering scrapers in parallel...');
+    
+    // Check if we have Instagram/Facebook links
+    const igLink = onlinePresenceData.socialLinks.find(l => l.platform === 'instagram');
+    const fbLink = onlinePresenceData.socialLinks.find(l => l.platform === 'facebook');
+    
+    // Trigger Instagram scraper (if not already started)
+    if (igLink && !igScraperStartedRef.current) {
+      const username = extractUsernameFromUrl(igLink.url, 'instagram');
+      if (username) {
+        const igCacheKey = `analysis_${scanId}_instagram`;
+        const existingIg = localStorage.getItem(igCacheKey);
+        if (!existingIg) {
+          igScraperStartedRef.current = true; // Mark as started BEFORE async call
+          console.log('[SCRAPERS] 🚀 Starting Instagram scraper NOW for:', username);
+          (async () => {
+            try {
+              const response = await fetch("/api/test/instagram-scrape", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username }),
+              });
+              if (response.ok) {
+                const data = await response.json();
+                localStorage.setItem(igCacheKey, JSON.stringify(data));
+                console.log('[SCRAPERS] ✅ Instagram scraper complete');
+              }
+            } catch (error) {
+              console.error('[SCRAPERS] ❌ Instagram scraper failed:', error);
+            } finally {
+              setAnalyzersComplete(prev => ({ ...prev, instagram: true }));
+            }
+          })();
+        } else {
+          console.log('[SCRAPERS] Instagram already cached');
+          setAnalyzersComplete(prev => ({ ...prev, instagram: true }));
+        }
+      } else {
+        setAnalyzersComplete(prev => ({ ...prev, instagram: true }));
+      }
+    }
+    
+    // Trigger Facebook scraper (if not already started) - IN PARALLEL with Instagram
+    if (fbLink && !fbScraperStartedRef.current) {
+      const username = extractUsernameFromUrl(fbLink.url, 'facebook');
+      if (username) {
+        const fbCacheKey = `analysis_${scanId}_facebook`;
+        const existingFb = localStorage.getItem(fbCacheKey);
+        if (!existingFb) {
+          fbScraperStartedRef.current = true; // Mark as started BEFORE async call
+          console.log('[SCRAPERS] 🚀 Starting Facebook scraper NOW for:', username);
+          (async () => {
+            try {
+              const response = await fetch("/api/test/facebook-scrape", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username }),
+              });
+              if (response.ok) {
+                const data = await response.json();
+                localStorage.setItem(fbCacheKey, JSON.stringify(data));
+                console.log('[SCRAPERS] ✅ Facebook scraper complete');
+              }
+            } catch (error) {
+              console.error('[SCRAPERS] ❌ Facebook scraper failed:', error);
+            } finally {
+              setAnalyzersComplete(prev => ({ ...prev, facebook: true }));
+            }
+          })();
+        } else {
+          console.log('[SCRAPERS] Facebook already cached');
+          setAnalyzersComplete(prev => ({ ...prev, facebook: true }));
+        }
+      } else {
+        setAnalyzersComplete(prev => ({ ...prev, facebook: true }));
+      }
+    }
+    
+    // Mark complete if no links found
+    if (!igLink) setAnalyzersComplete(prev => ({ ...prev, instagram: true }));
+    if (!fbLink) setAnalyzersComplete(prev => ({ ...prev, facebook: true }));
+    
+  }, [onlinePresenceData, scanId]);
+  
+  // Check if all analyzers are complete
+  useEffect(() => {
+    const { gbp, website, instagram, facebook } = analyzersComplete;
+    const allComplete = gbp && website && instagram && facebook;
+    if (allComplete && !allAnalyzersComplete) {
+      console.log('[ANALYZERS] ✅ All analyzers complete!');
+      setAllAnalyzersComplete(true);
+    }
+  }, [analyzersComplete, allAnalyzersComplete]);
+  
+  // Helper function to extract username from social URL
+  function extractUsernameFromUrl(url: string, platform: 'instagram' | 'facebook'): string | null {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const parts = pathname.replace(/^\/|\/$/g, '').split('/');
+      
+      if (platform === 'instagram') {
+        if (parts[0] && parts[0] !== 'p' && parts[0] !== 'reel' && parts[0] !== 'stories') {
+          return parts[0];
+        }
+      } else if (platform === 'facebook') {
+        if (parts[0] && parts[0] !== 'pages' && parts[0] !== 'profile' && parts[0] !== 'people') {
+          return parts[0];
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
 
   // Manual navigation handlers - NO automatic progression
   // Steps only change when user clicks Previous/Next buttons or clicks on a step item
@@ -407,6 +742,21 @@ export default function ReportScanClient({
                     address={addr}
                     scanId={scanId}
                     initialData={onlinePresenceData}
+                    allAnalyzersComplete={allAnalyzersComplete}
+                    onComplete={() => {
+                      // Navigate to analysis page ONLY when all analyzers complete
+                      // allAnalyzersComplete already ensures all analyzers have finished
+                      if (currentStep === 4 && !stage4AutoProgressRef.current && allAnalyzersComplete) {
+                        stage4AutoProgressRef.current = true;
+                        console.log('[NAVIGATION] All analyzers complete, navigating to analysis page...');
+                        router.push(`/report/${scanId}/analysis?placeId=${encodeURIComponent(placeId)}&name=${encodeURIComponent(name)}&addr=${encodeURIComponent(addr)}`);
+                      } else if (currentStep === 4 && !stage4AutoProgressRef.current) {
+                        console.log('[NAVIGATION] Waiting for analyzers to complete...', {
+                          allAnalyzersComplete,
+                          analyzersComplete,
+                        });
+                      }
+                    }}
                   />
                 </div>
               ) : (
