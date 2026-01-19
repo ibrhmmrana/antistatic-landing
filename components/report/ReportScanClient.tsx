@@ -602,10 +602,10 @@ export default function ReportScanClient({
     }
   }, [scanId, allAnalyzersComplete, analyzersComplete.gbp, analyzersComplete.website, analyzersComplete.aiAnalysis]);
 
-  // Show initial loading screen for at least 3 seconds
+  // Show initial loading screen for at least 6 seconds
   useEffect(() => {
     const startTime = Date.now();
-    const minDisplayTime = 3000; // 3 seconds minimum
+    const minDisplayTime = 6000; // 6 seconds minimum (extended from 3)
 
     const checkAndHide = () => {
       const elapsed = Date.now() - startTime;
@@ -630,11 +630,11 @@ export default function ReportScanClient({
       checkCompetitorsReady();
     }, 500);
 
-    // Fallback: hide after 5 seconds max
+    // Fallback: hide after 10 seconds max (extended from 5)
     setTimeout(() => {
       clearInterval(interval);
       setShowInitialLoading(false);
-    }, 5000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [scanId]);

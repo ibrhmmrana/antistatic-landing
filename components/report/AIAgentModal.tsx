@@ -54,7 +54,7 @@ export default function AIAgentModal({ stage, stageName }: AIAgentModalProps) {
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentMessageIndex((prev) => (prev + 1) % messages.length);
-    }, 1000); // Change every second
+    }, 3000); // Change every 3 seconds (slower rotation)
 
     return () => clearInterval(interval);
   }, [messages.length]);
