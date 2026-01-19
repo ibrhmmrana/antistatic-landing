@@ -1983,17 +1983,49 @@ async function captureScreenshot(
         // Track if we successfully bypassed via CSE (to skip re-navigation later)
         let cseBypassSuccessful = false;
         
-        // STEP 1: Inject session cookies BEFORE navigation (if configured)
+        // STEP 1: Navigate to Instagram homepage first to establish domain context
+        console.log(`[SCREENSHOT] Navigating to Instagram homepage to establish domain context...`);
+        await page.goto('https://www.instagram.com/', {
+          waitUntil: 'domcontentloaded',
+          timeout: TIMEOUT_MS
+        });
+        
+        // STEP 2: Inject session cookies AFTER navigation (if configured)
+        // This ensures cookies are set on the correct domain
         const sessionInjected = await injectInstagramSessionCookies(context);
         
         if (sessionInjected) {
-          console.log(`[SCREENSHOT] 🔐 Session cookies injected - navigating directly to profile`);
+          console.log(`[SCREENSHOT] 🔐 Session cookies injected after homepage navigation`);
+          
+          // Wait a bit for cookies to be recognized
+          await page.waitForTimeout(2000);
+          
+          // Re-navigate to homepage to validate session
+          console.log(`[SCREENSHOT] Re-navigating to homepage to validate session...`);
+          await page.goto('https://www.instagram.com/', {
+            waitUntil: 'domcontentloaded',
+            timeout: TIMEOUT_MS
+          });
+          
+          await page.waitForTimeout(2000);
+          
+          // Check if we're still authenticated (not redirected to login)
+          const homeUrl = page.url();
+          const homeState = classifyInstagramPageState(homeUrl);
+          console.log(`[SCREENSHOT] Homepage URL: ${homeUrl}, State: ${homeState}`);
+          
+          if (homeState === 'LOGIN') {
+            console.log(`[SCREENSHOT] ⚠️ Session cookies invalid - redirected to login from homepage`);
+            console.log(`[SCREENSHOT] 💡 Session may be expired. Please refresh INSTAGRAM_SESSION_ID in environment variables.`);
+          } else {
+            console.log(`[SCREENSHOT] ✅ Session validated on homepage - proceeding to profile`);
+          }
         } else {
           console.log(`[SCREENSHOT] ⚠️ No session cookies - will rely on fallback methods if blocked`);
         }
         
-        // STEP 2: Navigate directly to Instagram profile URL
-        console.log(`[SCREENSHOT] Navigating to: ${normalizedUrl}`);
+        // STEP 3: Navigate to Instagram profile URL
+        console.log(`[SCREENSHOT] Navigating to profile: ${normalizedUrl}`);
         await page.goto(normalizedUrl, {
           waitUntil: 'domcontentloaded',
           timeout: TIMEOUT_MS
