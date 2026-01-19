@@ -570,6 +570,3 @@ export async function getSearchVisibility(params: {
     };
   }
 }
-
-// Keep legacy function signature for backwards compatibility
-export { type SearchQuery };
