@@ -67,7 +67,7 @@ export default function ReportTopCards({
         </h3>
         
         {/* Scrollable list showing 5 items, scroll to see more */}
-        <div className="max-h-[280px] overflow-y-auto space-y-2 pr-2">
+        <div className="max-h-[280px] overflow-y-auto space-y-2 pr-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {competitors.list.map((competitor) => (
             <div 
               key={competitor.rank} 
