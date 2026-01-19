@@ -1165,9 +1165,9 @@ export function assembleReport(input: AssembleReportInput): ReportSchema {
     },
     dataFreshness: {
       websiteCrawl: calculateFreshness(websiteCrawl?.scrape_metadata?.timestamp),
-      gbpAnalysis: gbpAnalysis ? 'fresh' : 'missing',
-      instagramScrape: instagram ? 'fresh' : 'missing',
-      facebookScrape: facebook ? 'fresh' : 'missing',
+      gbpAnalysis: (gbpAnalysis ? 'fresh' : 'missing') as DataFreshness,
+      instagramScrape: (instagram ? 'fresh' : 'missing') as DataFreshness,
+      facebookScrape: (facebook ? 'fresh' : 'missing') as DataFreshness,
     },
   };
   
