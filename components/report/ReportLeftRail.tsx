@@ -38,7 +38,7 @@ export default function ReportLeftRail({ scores }: ReportLeftRailProps) {
   const offset = circumference - (overallPercentage / 100) * circumference;
   
   return (
-    <div className="w-64 sticky top-0 h-screen p-6 flex flex-col items-center overflow-y-auto rounded-r-2xl m-4 mr-0"
+    <div className="w-64 sticky top-0 h-screen p-8 flex flex-col items-center overflow-y-auto rounded-r-2xl m-4 mr-0"
          style={{
            background: 'linear-gradient(135deg, #0a1628 0%, #0f1f3a 100%)',
            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
