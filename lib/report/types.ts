@@ -63,7 +63,7 @@ export interface CompetitorsCard {
 }
 
 export interface MapPackResult {
-  placeId: string;
+  placeId: string | null;
   name: string;
   rating: number | null;
   reviews: number | null;

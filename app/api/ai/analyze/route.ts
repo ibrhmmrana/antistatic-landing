@@ -1,0 +1,175 @@
+/**
+ * AI Analysis API Endpoint
+ * Analyzes social media presence, reviews, and cross-platform consistency
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import {
+  analyzeFullPresence,
+  analyzeSocialProfile,
+  analyzeConsistency,
+  analyzeReviews,
+  analyzeComments,
+  FullPresenceAnalysis,
+} from '@/lib/ai/analyzePresence';
+
+interface AnalyzeRequest {
+  type: 'full' | 'instagram' | 'facebook' | 'consistency' | 'reviews' | 'comments';
+  businessName: string;
+  businessCategory: string;
+  data: {
+    instagram?: {
+      biography?: string | null;
+      website?: string | null;
+      category?: string | null;
+      phone?: string | null;
+      address?: string | null;
+      followerCount?: number | null;
+      postCount?: number | null;
+    };
+    facebook?: {
+      description?: string | null;
+      website?: string | null;
+      phone?: string | null;
+      address?: string | null;
+      hours?: string | null;
+    };
+    website?: {
+      description?: string | null;
+      phone?: string | null;
+      address?: string | null;
+      hours?: string | null;
+    };
+    reviews?: Array<{
+      text: string;
+      rating: number;
+      authorName?: string;
+      relativeTime?: string;
+    }>;
+    instagramComments?: Array<{ text: string; postContext?: string }>;
+    facebookComments?: Array<{ text: string; postContext?: string }>;
+  };
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    // Check for API key
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'OpenAI API key not configured' },
+        { status: 500 }
+      );
+    }
+
+    const body: AnalyzeRequest = await request.json();
+    const { type, businessName, businessCategory, data } = body;
+
+    if (!businessName || !businessCategory) {
+      return NextResponse.json(
+        { error: 'businessName and businessCategory are required' },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[AI Analyze] Starting ${type} analysis for "${businessName}"`);
+
+    let result: FullPresenceAnalysis | Record<string, unknown>;
+
+    switch (type) {
+      case 'full':
+        result = await analyzeFullPresence(businessName, businessCategory, {
+          instagram: data.instagram ? { ...data.instagram, platform: 'instagram' } : undefined,
+          facebook: data.facebook ? { ...data.facebook, platform: 'facebook' } : undefined,
+          website: data.website ? { ...data.website, platform: 'website' } : undefined,
+          reviews: data.reviews,
+          instagramComments: data.instagramComments,
+          facebookComments: data.facebookComments,
+        });
+        break;
+
+      case 'instagram':
+        if (!data.instagram) {
+          return NextResponse.json(
+            { error: 'Instagram data is required for instagram analysis' },
+            { status: 400 }
+          );
+        }
+        result = await analyzeSocialProfile(businessName, businessCategory, {
+          ...data.instagram,
+          platform: 'instagram',
+        });
+        break;
+
+      case 'facebook':
+        if (!data.facebook) {
+          return NextResponse.json(
+            { error: 'Facebook data is required for facebook analysis' },
+            { status: 400 }
+          );
+        }
+        result = await analyzeSocialProfile(businessName, businessCategory, {
+          ...data.facebook,
+          platform: 'facebook',
+        });
+        break;
+
+      case 'consistency':
+        const profiles = [];
+        if (data.instagram) profiles.push({ ...data.instagram, platform: 'instagram' as const });
+        if (data.facebook) profiles.push({ ...data.facebook, platform: 'facebook' as const });
+        if (data.website) profiles.push({ ...data.website, platform: 'website' as const });
+
+        if (profiles.length < 2) {
+          return NextResponse.json(
+            { error: 'At least 2 profiles required for consistency analysis' },
+            { status: 400 }
+          );
+        }
+        result = await analyzeConsistency(businessName, profiles);
+        break;
+
+      case 'reviews':
+        if (!data.reviews || data.reviews.length === 0) {
+          return NextResponse.json(
+            { error: 'Reviews data is required for reviews analysis' },
+            { status: 400 }
+          );
+        }
+        result = await analyzeReviews(businessName, businessCategory, data.reviews);
+        break;
+
+      case 'comments':
+        const platform = data.instagramComments ? 'instagram' : 'facebook';
+        const comments = data.instagramComments || data.facebookComments;
+        if (!comments || comments.length === 0) {
+          return NextResponse.json(
+            { error: 'Comments data is required for comments analysis' },
+            { status: 400 }
+          );
+        }
+        result = await analyzeComments(businessName, platform, comments);
+        break;
+
+      default:
+        return NextResponse.json(
+          { error: `Invalid analysis type: ${type}` },
+          { status: 400 }
+        );
+    }
+
+    console.log(`[AI Analyze] Completed ${type} analysis for "${businessName}"`);
+
+    return NextResponse.json({
+      success: true,
+      type,
+      businessName,
+      analysis: result,
+    });
+  } catch (error) {
+    console.error('[AI Analyze] Error:', error);
+    return NextResponse.json(
+      { error: 'Failed to perform analysis', details: String(error) },
+      { status: 500 }
+    );
+  }
+}

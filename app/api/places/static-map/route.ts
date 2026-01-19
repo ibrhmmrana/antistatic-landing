@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     // If placeIds are provided, fetch their locations
     if (placeIds) {
       const placeIdArray = placeIds.split(',').filter(Boolean);
+      console.log(`[Static Map] Processing ${placeIdArray.length} place IDs:`, placeIdArray);
       const locations: Array<{ lat: number; lng: number }> = [];
 
       for (const placeId of placeIdArray) {
@@ -36,15 +37,22 @@ export async function GET(request: NextRequest) {
           const detailsResponse = await fetch(detailsUrl.toString());
           const detailsData = await detailsResponse.json();
 
+          console.log(`[Static Map] Place ${placeId} response status:`, detailsData.status);
+
           if (detailsData.status === 'OK' && detailsData.result?.geometry?.location) {
             const loc = detailsData.result.geometry.location;
             locations.push({ lat: loc.lat, lng: loc.lng });
             markers.push(`color:red|${loc.lat},${loc.lng}`);
+            console.log(`[Static Map] Found location for ${placeId}:`, loc);
+          } else {
+            console.warn(`[Static Map] No geometry for ${placeId}:`, detailsData.status, detailsData.error_message || '');
           }
         } catch (error) {
-          console.error(`Error fetching location for place ${placeId}:`, error);
+          console.error(`[Static Map] Error fetching location for place ${placeId}:`, error);
         }
       }
+
+      console.log(`[Static Map] Total locations found: ${locations.length}`);
 
       // Calculate center from all locations
       if (locations.length > 0) {
@@ -52,12 +60,14 @@ export async function GET(request: NextRequest) {
         const avgLng = locations.reduce((sum, loc) => sum + loc.lng, 0) / locations.length;
         centerLat = avgLat.toString();
         centerLng = avgLng.toString();
+        console.log(`[Static Map] Calculated center:`, { avgLat, avgLng });
       } else {
-        // If no locations found, return error
-        return NextResponse.json(
-          { error: "Could not fetch locations for provided place IDs" },
-          { status: 400 }
-        );
+        // If no locations found, return a placeholder image instead of error
+        console.warn(`[Static Map] No valid locations found, returning placeholder`);
+        // Return a simple gray placeholder
+        return new NextResponse(null, {
+          status: 204, // No content - let frontend handle fallback
+        });
       }
     } else if (lat && lng) {
       // Single marker mode

@@ -8,6 +8,7 @@ interface ReportTopCardsProps {
   competitors: CompetitorsCard;
   businessName: string;
   websiteUrl: string | null;
+  businessAvatar?: string | null;
 }
 
 export default function ReportTopCards({
@@ -15,30 +16,51 @@ export default function ReportTopCards({
   competitors,
   businessName,
   websiteUrl,
+  businessAvatar,
 }: ReportTopCardsProps) {
+  // Use passed businessAvatar or fallback to impact.businessAvatar
+  const avatarUrl = businessAvatar || impact.businessAvatar;
+  
+  // Generate problem-focused header without monetary values
+  const getImpactHeader = () => {
+    const count = impact.topProblems.length;
+    if (count === 0) return "Your online presence looks good!";
+    if (count === 1) return "We found 1 issue affecting your visibility";
+    if (count <= 3) return `We found ${count} issues affecting your visibility`;
+    return `We found ${count} issues that need attention`;
+  };
+  
   return (
     <div className="grid grid-cols-2 gap-6 mb-8">
       {/* Impact Card */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          {impact.estimatedLossMonthly !== null
-            ? `You could be losing ~$${impact.estimatedLossMonthly}/month due to ${impact.topProblems.length} problems`
-            : `You have ${impact.topProblems.length} problems to fix`}
+          {getImpactHeader()}
         </h3>
         
         {/* Business Info */}
         <div className="flex items-center gap-3 mb-4">
-          {impact.businessAvatar ? (
+          {avatarUrl ? (
             <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
               <img
-                src={impact.businessAvatar}
+                src={avatarUrl}
                 alt={businessName}
                 className="w-full h-full object-cover"
+                onError={(e) => {
+                  // Fallback to initial on error
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  const parent = target.parentElement;
+                  if (parent) {
+                    parent.innerHTML = `<span class="text-gray-500 text-lg font-medium">${businessName.charAt(0)}</span>`;
+                    parent.className = 'w-12 h-12 rounded-lg bg-gray-200 flex-shrink-0 flex items-center justify-center';
+                  }
+                }}
               />
             </div>
           ) : (
             <div className="w-12 h-12 rounded-lg bg-gray-200 flex-shrink-0 flex items-center justify-center">
-              <span className="text-gray-400 text-xs">{businessName.charAt(0)}</span>
+              <span className="text-gray-500 text-lg font-medium">{businessName.charAt(0)}</span>
             </div>
           )}
           <div>

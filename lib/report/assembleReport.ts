@@ -1104,13 +1104,13 @@ export function assembleReport(input: AssembleReportInput): ReportSchema {
       mapPack: {
         rank: q.mapPack?.rank ?? null,
         results: (q.mapPack?.results || []).map((r: any) => ({
-          placeId: r.place_id || '',
+          placeId: r.place_id || null,
           name: r.name || '',
           rating: r.rating ?? null,
           reviews: r.reviews ?? null,
           address: r.address || null,
           website: r.website || null,
-          isTargetBusiness: r.place_id === businessIdentity?.place_id,
+          isTargetBusiness: r.place_id && r.place_id === businessIdentity?.place_id,
         })),
       },
       organic: {
