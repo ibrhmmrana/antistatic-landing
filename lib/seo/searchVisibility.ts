@@ -403,7 +403,7 @@ function aggregateCompetitorDomains(queryResults: QueryResult[], targetHost: str
   const directories: CompetitorDomain[] = [];
   const businesses: CompetitorDomain[] = [];
   
-  for (const [domain, data] of domainData) {
+  for (const [domain, data] of Array.from(domainData)) {
     const item: CompetitorDomain = {
       domain,
       frequency: data.frequency,
