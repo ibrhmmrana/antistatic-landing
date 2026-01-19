@@ -9,6 +9,8 @@ import StageReviewSentiment from "./StageReviewSentiment";
 import StagePhotoCollage from "./StagePhotoCollage";
 import StageOnlinePresence from "./StageOnlinePresence";
 import ScanLineOverlay from "./ScanLineOverlay";
+import AIAgentLoadingScreen from "./AIAgentLoadingScreen";
+import AIAgentModal from "./AIAgentModal";
 
 interface ReportScanClientProps {
   scanId: string;
@@ -42,6 +44,7 @@ export default function ReportScanClient({
   const [currentStep, setCurrentStep] = useState(0);
   const [placeDetails, setPlaceDetails] = useState<PlaceDetails | null>(null);
   const [onlinePresenceData, setOnlinePresenceData] = useState<OnlinePresenceResult | null>(null);
+  const [showInitialLoading, setShowInitialLoading] = useState(true);
   const scraperTriggeredRef = useRef(false); // Prevent duplicate scraper triggers
   const websiteScreenshotTriggeredRef = useRef(false); // Prevent duplicate website screenshot triggers
   const stage4AutoProgressRef = useRef(false); // Track if we've already auto-progressed from stage 4
@@ -55,6 +58,7 @@ export default function ReportScanClient({
     website: false,
     instagram: false,
     facebook: false,
+    aiAnalysis: false, // Track AI analysis completion
   });
   const [allAnalyzersComplete, setAllAnalyzersComplete] = useState(false);
 
@@ -532,15 +536,108 @@ export default function ReportScanClient({
     
   }, [onlinePresenceData, scanId]);
   
-  // Check if all analyzers are complete
+  // Check if all analyzers are complete (including AI analysis)
   useEffect(() => {
-    const { gbp, website, instagram, facebook } = analyzersComplete;
-    const allComplete = gbp && website && instagram && facebook;
+    const { gbp, website, instagram, facebook, aiAnalysis } = analyzersComplete;
+    const allComplete = gbp && website && instagram && facebook && aiAnalysis;
     if (allComplete && !allAnalyzersComplete) {
-      console.log('[ANALYZERS] ✅ All analyzers complete!');
+      console.log('[ANALYZERS] ✅ All analyzers complete (including AI analysis)!');
       setAllAnalyzersComplete(true);
+      
+      // Navigate to analysis page when everything is complete
+      if (currentStep === 4 && !stage4AutoProgressRef.current) {
+        stage4AutoProgressRef.current = true;
+        console.log('[NAVIGATION] All analyzers including AI complete, navigating to analysis page...');
+        router.push(`/report/${scanId}/analysis?placeId=${encodeURIComponent(placeId)}&name=${encodeURIComponent(name)}&addr=${encodeURIComponent(addr)}`);
+      }
     }
-  }, [analyzersComplete, allAnalyzersComplete]);
+  }, [analyzersComplete, allAnalyzersComplete, currentStep, scanId, placeId, name, addr, router]);
+
+  // Check for AI analysis completion
+  useEffect(() => {
+    if (!allAnalyzersComplete && analyzersComplete.gbp && analyzersComplete.website) {
+      // Check if AI analysis is already cached
+      const aiCacheKey = `analysis_${scanId}_ai`;
+      const cachedAi = localStorage.getItem(aiCacheKey);
+      if (cachedAi) {
+        try {
+          const parsed = JSON.parse(cachedAi);
+          if (parsed && Object.keys(parsed).length > 0) {
+            console.log('[ANALYZERS] ✅ AI analysis already cached');
+            setAnalyzersComplete(prev => ({ ...prev, aiAnalysis: true }));
+            return;
+          }
+        } catch (e) {
+          console.error('[ANALYZERS] Failed to parse cached AI analysis:', e);
+        }
+      }
+
+      // Poll for AI analysis completion (it's triggered from analysis page)
+      const checkInterval = setInterval(() => {
+        const cached = localStorage.getItem(aiCacheKey);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed && Object.keys(parsed).length > 0) {
+              console.log('[ANALYZERS] ✅ AI analysis complete (polling)');
+              setAnalyzersComplete(prev => ({ ...prev, aiAnalysis: true }));
+              clearInterval(checkInterval);
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+      }, 2000); // Check every 2 seconds
+
+      // Fallback: mark as complete after 60 seconds
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        if (!analyzersComplete.aiAnalysis) {
+          console.log('[ANALYZERS] Fallback timeout - marking AI analysis as complete');
+          setAnalyzersComplete(prev => ({ ...prev, aiAnalysis: true }));
+        }
+      }, 60000);
+
+      return () => clearInterval(checkInterval);
+    }
+  }, [scanId, allAnalyzersComplete, analyzersComplete.gbp, analyzersComplete.website, analyzersComplete.aiAnalysis]);
+
+  // Show initial loading screen for at least 3 seconds
+  useEffect(() => {
+    const startTime = Date.now();
+    const minDisplayTime = 3000; // 3 seconds minimum
+
+    const checkAndHide = () => {
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= minDisplayTime) {
+        setShowInitialLoading(false);
+      } else {
+        setTimeout(checkAndHide, minDisplayTime - elapsed);
+      }
+    };
+
+    // Also check if competitors are ready (Stage 0)
+    const checkCompetitorsReady = () => {
+      // Check if we have competitors data or if enough time has passed
+      const competitorsReady = localStorage.getItem(`competitors_${scanId}`);
+      if (competitorsReady) {
+        checkAndHide();
+      }
+    };
+
+    // Check every 500ms
+    const interval = setInterval(() => {
+      checkCompetitorsReady();
+    }, 500);
+
+    // Fallback: hide after 5 seconds max
+    setTimeout(() => {
+      clearInterval(interval);
+      setShowInitialLoading(false);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [scanId]);
   
   // Helper function to extract username from social URL
   function extractUsernameFromUrl(url: string, platform: 'instagram' | 'facebook'): string | null {
@@ -678,9 +775,13 @@ export default function ReportScanClient({
       <div className="flex-1 flex flex-col relative overflow-hidden">
             {/* Preview Area */}
             <div className="flex-1 relative overflow-hidden min-h-[600px]">
-              {currentStep === 0 ? (
+              {/* Initial AI Agents Loading Screen */}
+              {showInitialLoading ? (
+                <AIAgentLoadingScreen businessName={name} />
+              ) : currentStep === 0 ? (
                 // Competitors - Real Google Map (Owner.com style - no card wrapper)
                 <div className="absolute inset-0">
+                  <AIAgentModal stage={0} stageName={`${name} & competitors`} />
                   <StageCompetitorMap 
                     placeId={placeId} 
                     name={name}
@@ -695,6 +796,7 @@ export default function ReportScanClient({
               ) : currentStep === 1 ? (
                 // Google Business Profile step
                 <div className="absolute inset-0">
+                  <AIAgentModal stage={1} stageName="Google business profile" />
                   <ScanLineOverlay />
                   <StageGoogleBusinessProfile 
                     placeId={placeId}
@@ -709,6 +811,7 @@ export default function ReportScanClient({
               ) : currentStep === 2 ? (
                 // Google Review Sentiment step
                 <div className="absolute inset-0">
+                  <AIAgentModal stage={2} stageName="Google review sentiment" />
                   <ScanLineOverlay />
                   <StageReviewSentiment 
                     placeId={placeId}
@@ -723,6 +826,7 @@ export default function ReportScanClient({
               ) : currentStep === 3 ? (
                 // Photo quality and quantity step
                 <div className="absolute inset-0">
+                  <AIAgentModal stage={3} stageName="Photo quality and quantity" />
                   <ScanLineOverlay />
                   <StagePhotoCollage 
                     placeId={placeId}
@@ -737,6 +841,7 @@ export default function ReportScanClient({
               ) : currentStep === 4 ? (
                 // Step 4: Online presence analysis
                 <div className="absolute inset-0">
+                  <AIAgentModal stage={4} stageName="Online presence analysis" />
                   <StageOnlinePresence 
                     businessName={name}
                     address={addr}
@@ -744,18 +849,8 @@ export default function ReportScanClient({
                     initialData={onlinePresenceData}
                     allAnalyzersComplete={allAnalyzersComplete}
                     onComplete={() => {
-                      // Navigate to analysis page ONLY when all analyzers complete
-                      // allAnalyzersComplete already ensures all analyzers have finished
-                      if (currentStep === 4 && !stage4AutoProgressRef.current && allAnalyzersComplete) {
-                        stage4AutoProgressRef.current = true;
-                        console.log('[NAVIGATION] All analyzers complete, navigating to analysis page...');
-                        router.push(`/report/${scanId}/analysis?placeId=${encodeURIComponent(placeId)}&name=${encodeURIComponent(name)}&addr=${encodeURIComponent(addr)}`);
-                      } else if (currentStep === 4 && !stage4AutoProgressRef.current) {
-                        console.log('[NAVIGATION] Waiting for analyzers to complete...', {
-                          allAnalyzersComplete,
-                          analyzersComplete,
-                        });
-                      }
+                      // Don't navigate yet - wait for AI analysis
+                      console.log('[NAVIGATION] Stage 4 complete, waiting for AI analysis...');
                     }}
                   />
                 </div>

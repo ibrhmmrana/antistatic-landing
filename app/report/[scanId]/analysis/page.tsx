@@ -257,8 +257,12 @@ export default function AnalysisPage() {
         if (data.success && data.analysis) {
           setAiAnalysis(data.analysis);
           localStorage.setItem(`analysis_${scanId}_ai`, JSON.stringify(data.analysis));
+          // Mark AI analysis as complete for onboarding flow
+          console.log('[ANALYSIS PAGE] ✅ AI analysis complete and cached');
         } else {
           console.error('[ANALYSIS PAGE] AI analysis failed:', data.error);
+          // Mark as complete anyway to not block navigation
+          localStorage.setItem(`analysis_${scanId}_ai`, JSON.stringify({ complete: true }));
         }
       })
       .catch(error => {
@@ -269,13 +273,47 @@ export default function AnalysisPage() {
       });
   }, [scanId, placeId, placesDetails, gbpAnalysis, igResult, fbResult, reviews, websiteResult, socialsData]);
 
-  // Show loading state while assembling report
-  if (!report) {
+  // Show loading state while assembling report or waiting for AI analysis
+  const [waitingForAI, setWaitingForAI] = useState(true);
+
+  useEffect(() => {
+    // Check if AI analysis is complete
+    const aiCacheKey = `analysis_${scanId}_ai`;
+    const cachedAi = localStorage.getItem(aiCacheKey);
+    if (cachedAi) {
+      try {
+        const parsed = JSON.parse(cachedAi);
+        if (parsed && Object.keys(parsed).length > 0) {
+          setWaitingForAI(false);
+        }
+      } catch (e) {
+        // Ignore
+      }
+    }
+
+    // If AI analysis is being triggered, wait for it
+    if (aiAnalysisLoading) {
+      // Will be set to false when AI analysis completes
+    } else if (aiAnalysis) {
+      setWaitingForAI(false);
+    } else {
+      // If no AI analysis is running and we have enough data, mark as ready
+      // (AI analysis might not be needed if no social media/reviews)
+      const hasEnoughData = (igResult || fbResult || reviews.length > 0);
+      if (!hasEnoughData) {
+        setWaitingForAI(false);
+      }
+    }
+  }, [scanId, aiAnalysis, aiAnalysisLoading, igResult, fbResult, reviews.length]);
+
+  if (!report || waitingForAI) {
     return (
       <div className="min-h-screen bg-[#f6f7f8] flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Assembling your report...</p>
+          <p className="text-gray-600">
+            {waitingForAI ? 'AI agents are finalizing your analysis...' : 'Assembling your report...'}
+          </p>
         </div>
       </div>
     );
