@@ -41,7 +41,7 @@ export default function ReportSearchVisibility({
   const targetDomainNormalized = targetDomain ? normalizeDomain(targetDomain) : null;
   
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8 shadow-sm">
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-1">

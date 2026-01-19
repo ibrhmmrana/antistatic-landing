@@ -47,7 +47,7 @@ export default function ReportChecklistSection({ section }: ReportChecklistSecti
   const total = section.checks.length;
   
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8 shadow-sm">
       {/* Section Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">

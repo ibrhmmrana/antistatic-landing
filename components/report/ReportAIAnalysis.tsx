@@ -139,7 +139,7 @@ export default function ReportAIAnalysis({ analysis, isLoading }: ReportAIAnalys
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8 shadow-sm">
       <div className="flex items-center gap-3 mb-6">
         <Sparkles className="w-6 h-6 text-blue-600" />
         <h2 className="text-xl font-semibold text-gray-900">AI-Powered Analysis</h2>

@@ -368,7 +368,7 @@ export default function AnalysisPage() {
           
           {/* Google Reviews Section */}
           {placeId && reviews.length > 0 && (
-            <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+            <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8 shadow-sm">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">📝 Google Reviews</h2>
               <div className="space-y-4">
                 {reviews.map((review) => {
