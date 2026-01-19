@@ -189,11 +189,33 @@ async function captureWebsiteScreenshot(
 
     console.log(`[SCREENSHOT] Navigating to ${normalizedUrl}...`);
 
-    // Simple navigation with networkidle wait
-    await page.goto(normalizedUrl, {
-      waitUntil: 'networkidle',
-      timeout: TIMEOUT_MS,
-    });
+    // Try networkidle first, but fallback to domcontentloaded if it times out
+    try {
+      await page.goto(normalizedUrl, {
+        waitUntil: 'networkidle',
+        timeout: 20000, // 20 seconds for networkidle
+      });
+      console.log(`[SCREENSHOT] Page loaded (networkidle)`);
+    } catch (networkIdleError: any) {
+      // If networkidle times out, try domcontentloaded as fallback
+      if (networkIdleError?.message?.includes('Timeout') || networkIdleError?.message?.includes('timeout')) {
+        console.log(`[SCREENSHOT] Network idle timeout, trying domcontentloaded...`);
+        try {
+          await page.goto(normalizedUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 15000, // 15 seconds for domcontentloaded
+          });
+          console.log(`[SCREENSHOT] Page loaded (domcontentloaded)`);
+          // Wait a bit for any critical resources
+          await page.waitForTimeout(2000);
+        } catch (domError) {
+          console.warn(`[SCREENSHOT] domcontentloaded also failed, proceeding anyway`);
+          // Continue anyway - page might still be usable
+        }
+      } else {
+        throw networkIdleError;
+      }
+    }
 
     // Brief wait for any final rendering
     await page.waitForTimeout(1000);

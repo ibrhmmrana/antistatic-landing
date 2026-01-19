@@ -109,9 +109,9 @@ export default function StageReviewSentiment({
     const lastReviewIndex = reviews.length - 1;
     // Last review animation starts at: lastReviewIndex * 3000ms
     // Animation duration is 0.5s (500ms), so review is fully visible at: (lastReviewIndex * 3000) + 500
-    // Wait 2 seconds after last review is fully visible
+    // Wait 0.5 seconds after last review is fully visible (reduced from 2 seconds)
     const animationDuration = 500; // fadeInUp animation duration
-    const delayAfterLastReview = 2000;
+    const delayAfterLastReview = 500; // Reduced from 2000ms to 500ms
     const totalDelay = (lastReviewIndex * 3000) + animationDuration + delayAfterLastReview;
 
     const timeout = setTimeout(() => {
