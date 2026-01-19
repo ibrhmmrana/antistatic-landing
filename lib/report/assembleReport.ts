@@ -28,6 +28,30 @@ interface WebsiteCrawlResult {
   scrape_metadata?: { timestamp?: string };
   site_overview?: { homepage_url?: string; primary_domain?: string; favicon_url?: string | null };
   crawl_map?: any[];
+  site_report_summary?: {
+    key_pages?: {
+      homepage?: string | null;
+      contact_page?: string | null;
+      booking_or_lead_page?: string | null;
+      pricing_page?: string | null;
+      about_page?: string | null;
+      services_page?: string | null;
+    };
+    intent_coverage?: {
+      has_services?: boolean;
+      has_pricing?: boolean;
+      has_contact?: boolean;
+      has_about?: boolean;
+      has_faq?: boolean;
+      has_locations?: boolean;
+      has_blog?: boolean;
+      has_booking?: boolean;
+    };
+    conversion_path_score?: number;
+    content_quality_score?: number;
+    trust_score?: number;
+    thin_pages_count?: number;
+  };
   business_identity?: {
     business_name?: string;
     category_label?: string;
