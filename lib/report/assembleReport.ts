@@ -954,8 +954,19 @@ export function assembleReport(input: AssembleReportInput): ReportSchema {
     searchResultsSection.checks
   );
   const websiteExperienceScore = calculateWebsiteExperienceScore(websiteExperienceSection.checks);
+  
+  // Transform GBP checklist to match expected type (filter out items without required fields)
+  const gbpChecklistForScore = (gbpAnalysis?.checklist || [])
+    .filter((item): item is { key: string; status: CheckStatus } => 
+      !!item.key && !!item.status
+    )
+    .map(item => ({
+      key: item.key,
+      status: item.status,
+    }));
+  
   const localListingsScore = calculateLocalListingsScore(
-    gbpAnalysis?.checklist || [],
+    gbpChecklistForScore,
     (websiteCrawl?.crawl_map || []).some((page: any) => (page.external_links?.social || []).length > 0)
   );
   const socialPresenceScore = calculateSocialPresenceScore(
