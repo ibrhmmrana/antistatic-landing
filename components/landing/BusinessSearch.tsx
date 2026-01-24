@@ -268,7 +268,6 @@ export default function BusinessSearch() {
 
           const hasLocal = localResults.length > 0;
           const hasGlobal = globalResults.length > 0;
-          const showGrouping = hasLocal && hasGlobal;
 
           return (
             <div
@@ -277,74 +276,56 @@ export default function BusinessSearch() {
             >
               <ul className="max-h-[320px] overflow-y-auto py-1">
                 {/* Local results section */}
-                {hasLocal && (
-                  <>
-                    {showGrouping && (
-                      <li className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-100">
-                        In your country
-                      </li>
+                {hasLocal && localResults.map(({ prediction, index }) => (
+                  <li
+                    key={prediction.place_id}
+                    data-prediction-index={index}
+                    role="option"
+                    aria-selected={highlightedIndex === index}
+                    onClick={() => handleSelect(prediction)}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    className={`cursor-pointer px-4 py-3 text-left transition-colors border-b border-gray-100 ${
+                      highlightedIndex === index
+                        ? "bg-gray-100"
+                        : "bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="text-[14px] font-medium text-gray-900 leading-5">
+                      {prediction.primary_text}
+                    </div>
+                    {prediction.secondary_text && (
+                      <div className="mt-0.5 text-[12px] text-gray-500 leading-4">
+                        {prediction.secondary_text}
+                      </div>
                     )}
-                    {localResults.map(({ prediction, index }) => (
-                      <li
-                        key={prediction.place_id}
-                        data-prediction-index={index}
-                        role="option"
-                        aria-selected={highlightedIndex === index}
-                        onClick={() => handleSelect(prediction)}
-                        onMouseEnter={() => setHighlightedIndex(index)}
-                        className={`cursor-pointer px-4 py-3 text-left transition-colors border-b border-gray-100 ${
-                          highlightedIndex === index
-                            ? "bg-gray-100"
-                            : "bg-white hover:bg-gray-50"
-                        }`}
-                      >
-                        <div className="text-[14px] font-medium text-gray-900 leading-5">
-                          {prediction.primary_text}
-                        </div>
-                        {prediction.secondary_text && (
-                          <div className="mt-0.5 text-[12px] text-gray-500 leading-4">
-                            {prediction.secondary_text}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </>
-                )}
+                  </li>
+                ))}
 
                 {/* Global results section */}
-                {hasGlobal && (
-                  <>
-                    {showGrouping && (
-                      <li className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 border-b border-gray-100 border-t border-gray-100">
-                        Other results
-                      </li>
+                {hasGlobal && globalResults.map(({ prediction, index }) => (
+                  <li
+                    key={prediction.place_id}
+                    data-prediction-index={index}
+                    role="option"
+                    aria-selected={highlightedIndex === index}
+                    onClick={() => handleSelect(prediction)}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    className={`cursor-pointer px-4 py-3 text-left transition-colors border-b border-gray-100 last:border-b-0 ${
+                      highlightedIndex === index
+                        ? "bg-gray-100"
+                        : "bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="text-[14px] font-medium text-gray-900 leading-5">
+                      {prediction.primary_text}
+                    </div>
+                    {prediction.secondary_text && (
+                      <div className="mt-0.5 text-[12px] text-gray-500 leading-4">
+                        {prediction.secondary_text}
+                      </div>
                     )}
-                    {globalResults.map(({ prediction, index }) => (
-                      <li
-                        key={prediction.place_id}
-                        data-prediction-index={index}
-                        role="option"
-                        aria-selected={highlightedIndex === index}
-                        onClick={() => handleSelect(prediction)}
-                        onMouseEnter={() => setHighlightedIndex(index)}
-                        className={`cursor-pointer px-4 py-3 text-left transition-colors border-b border-gray-100 last:border-b-0 ${
-                          highlightedIndex === index
-                            ? "bg-gray-100"
-                            : "bg-white hover:bg-gray-50"
-                        }`}
-                      >
-                        <div className="text-[14px] font-medium text-gray-900 leading-5">
-                          {prediction.primary_text}
-                        </div>
-                        {prediction.secondary_text && (
-                          <div className="mt-0.5 text-[12px] text-gray-500 leading-4">
-                            {prediction.secondary_text}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </>
-                )}
+                  </li>
+                ))}
               </ul>
             </div>
           );
