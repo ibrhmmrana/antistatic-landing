@@ -23,9 +23,25 @@ const nextConfig = {
         hostname: '127.0.0.1',
         pathname: '/**',
       },
+      // Instagram CDN domains
+      {
+        protocol: 'https',
+        hostname: '*.cdninstagram.com',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.fbcdn.net',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.instagram.com',
+        pathname: '/**',
+      },
     ],
-    // Allow images from local API routes
-    domains: ['localhost', '127.0.0.1'],
+    // Allow images from local API routes and Instagram
+    domains: ['localhost', '127.0.0.1', 'cdninstagram.com', 'fbcdn.net', 'instagram.com'],
     unoptimized: process.env.NODE_ENV === 'development', // Disable optimization in dev to avoid issues
   },
 };
