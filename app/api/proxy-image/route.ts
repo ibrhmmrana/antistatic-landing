@@ -14,11 +14,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing url parameter" }, { status: 400 });
   }
 
-  // Validate that it's an Instagram CDN URL for security
+  // Validate that it's an Instagram or Facebook CDN URL for security
   const allowedDomains = [
     "cdninstagram.com",
     "fbcdn.net",
     "instagram.com",
+    "facebook.com",
   ];
 
   try {
@@ -32,19 +33,34 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Proxy] Fetching image from: ${imageUrl.substring(0, 100)}...`);
 
-    // Fetch the image with Instagram-compatible headers
+    // Use different headers for Facebook vs Instagram
+    const isFacebook = url.hostname.includes('fbcdn.net') || url.hostname.includes('facebook.com');
+    const headers = isFacebook
+      ? {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": "https://www.facebook.com/",
+          "Origin": "https://www.facebook.com",
+          "Sec-Fetch-Dest": "image",
+          "Sec-Fetch-Mode": "no-cors",
+          "Sec-Fetch-Site": "same-site",
+        }
+      : {
+          "User-Agent": "Instagram 267.0.0.19.301 Android",
+          "X-IG-App-ID": "567067343352427",
+          "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Referer": "https://www.instagram.com/",
+          "Origin": "https://www.instagram.com",
+          "Sec-Fetch-Dest": "image",
+          "Sec-Fetch-Mode": "no-cors",
+          "Sec-Fetch-Site": "same-site",
+        };
+
+    // Fetch the image with appropriate headers
     const imageResponse = await fetch(imageUrl, {
-      headers: {
-        "User-Agent": "Instagram 267.0.0.19.301 Android",
-        "X-IG-App-ID": "567067343352427",
-        "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.instagram.com/",
-        "Origin": "https://www.instagram.com",
-        "Sec-Fetch-Dest": "image",
-        "Sec-Fetch-Mode": "no-cors",
-        "Sec-Fetch-Site": "same-site",
-      },
+      headers,
       redirect: "follow",
     });
 

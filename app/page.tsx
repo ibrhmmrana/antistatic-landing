@@ -1,28 +1,40 @@
 import Nav from "@/components/landing/Nav";
 import Hero from "@/components/landing/Hero";
+import ProductFeatures from "@/components/landing/ProductFeatures";
+import Pricing from "@/components/landing/Pricing";
 import Image from "next/image";
 import Link from "next/link";
 
 export default function Home() {
   return (
     <main className="relative min-h-screen">
-      {/* Background Image */}
-      <div className="fixed inset-0 z-0">
-        <Image
-          src="/images/Most-Advanced-TPU_1.max-2500x2500 (1).png"
-          alt="Background"
-          fill
-          priority
-          className="object-cover"
-          quality={90}
-          style={{ opacity: 1 }}
-        />
+      {/* Hero Section with Background */}
+      <div className="relative">
+        {/* Background Gradient - only for hero */}
+        <div className="absolute inset-0 z-0">
+          <Image
+            src="/images/background color.svg"
+            alt="Background"
+            fill
+            priority
+            className="object-cover"
+            quality={90}
+          />
+        </div>
+        <div className="relative z-10">
+          <Nav />
+          <Hero />
+        </div>
       </div>
 
-      {/* Content on top */}
-      <div className="relative z-10">
-        <Nav />
-        <Hero />
+      {/* Product Features Section with White Background */}
+      <div className="relative z-10 bg-white">
+        <ProductFeatures />
+      </div>
+
+      {/* Pricing Section */}
+      <div className="relative z-10 bg-white">
+        <Pricing />
       </div>
 
       {/* Sticky footer links - bottom left */}

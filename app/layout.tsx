@@ -51,7 +51,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={productSans.variable}>
-      <body className="font-sans antialiased">
+      <body className={`${productSans.className} antialiased`}>
         {children}
       </body>
     </html>

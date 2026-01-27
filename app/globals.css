@@ -70,7 +70,7 @@ body {
     opacity: 0.02;
   }
   100% {
-    transform: translateY(-100%);
+    transform: translateY(-120%);
     opacity: 0;
   }
 }
@@ -231,4 +231,87 @@ body {
     opacity: 1;
   }
 }
+
+/* Hero overlay fade-in animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.6s ease-out forwards;
+  opacity: 0;
+}
+
+.animate-fade-in-delay {
+  animation: fadeIn 0.6s ease-out 0.2s forwards;
+  opacity: 0;
+}
+
+.animate-fade-in-delay-2 {
+  animation: fadeIn 0.6s ease-out 0.4s forwards;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fade-in-delay,
+  .animate-fade-in-delay-2 {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Button rolling text effect with bounce */
+.button-roll-text {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button-roll-text span {
+  display: block;
+  transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.button-roll-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 150%);
+  white-space: nowrap;
+  transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.button-roll-text:hover span {
+  transform: translateY(-150%);
+}
+
+.button-roll-text:hover::after {
+  transform: translate(-50%, -50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-roll-text span,
+  .button-roll-text::after {
+    transition: none;
+  }
+  .button-roll-text:hover span {
+    transform: none;
+  }
+  .button-roll-text:hover::after {
+    transform: none;
+  }
+}
+
+
 
