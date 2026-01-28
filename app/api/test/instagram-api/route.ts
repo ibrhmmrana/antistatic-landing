@@ -859,6 +859,22 @@ async function scrapeInstagramAPI(username: string): Promise<{
 
   const sessionId = decodeSessionId(encodedSession);
   
+  // Optional: Validate session before scraping (can be disabled for performance)
+  // Uncomment to enable automatic session validation
+  /*
+  try {
+    const { InstagramSessionService } = await import('@/lib/services/instagram-session');
+    const sessionService = InstagramSessionService.getInstance();
+    const isValid = await sessionService.validateSession(sessionId);
+    if (!isValid) {
+      console.warn('[API] ⚠️ Session appears invalid - scraping may fail');
+      console.warn('[API] 💡 Tip: Call /api/instagram/session/refresh to refresh session');
+    }
+  } catch (error) {
+    console.warn('[API] ⚠️ Session validation skipped:', error);
+  }
+  */
+  
   // Validate session ID format
   console.log(`[API] Session ID decoded: ${sessionId.substring(0, 20)}... (length: ${sessionId.length})`);
   if (!sessionId || sessionId.length < 10) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Platform = "instagram" | "facebook";
 
@@ -97,6 +97,14 @@ interface FacebookPageData {
   error?: string;
 }
 
+interface SessionStatus {
+  healthy: boolean;
+  message: string;
+  session_age_hours?: number;
+  needs_refresh?: boolean;
+  has_session?: boolean;
+}
+
 export default function NewTestPage() {
   const [platform, setPlatform] = useState<Platform>("instagram");
   const [username, setUsername] = useState("fynrestaurantcpt");
@@ -109,6 +117,10 @@ export default function NewTestPage() {
   
   // Facebook state
   const [facebookData, setFacebookData] = useState<FacebookPageData | null>(null);
+  
+  // Session status state
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus | null>(null);
+  const [refreshingSession, setRefreshingSession] = useState(false);
 
   const handleScrape = async () => {
     setLoading(true);
@@ -174,10 +186,108 @@ export default function NewTestPage() {
     return new Date(timestamp * 1000).toLocaleDateString();
   };
 
+  // Check session status on mount and when platform changes to Instagram
+  const checkSessionStatus = async () => {
+    if (platform !== "instagram") return;
+    
+    try {
+      const response = await fetch("/api/instagram/session/status");
+      if (response.ok) {
+        const data = await response.json();
+        setSessionStatus(data);
+      }
+    } catch (error) {
+      console.error("Failed to check session status:", error);
+    }
+  };
+
+  // Refresh session manually
+  const handleRefreshSession = async () => {
+    setRefreshingSession(true);
+    try {
+      const apiKey = prompt("Enter API key (or leave empty if not configured):");
+      const headfulMode = confirm("Run in headful mode? (Click OK for headful, Cancel for headless)");
+      
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (apiKey) {
+        headers["X-API-Key"] = apiKey;
+      }
+
+      // Add headful parameter to URL
+      const url = `/api/instagram/session/refresh?headful=${headfulMode}`;
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert("Session refreshed successfully!");
+        await checkSessionStatus();
+      } else {
+        alert(`Session refresh failed: ${data.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      alert(`Error refreshing session: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setRefreshingSession(false);
+    }
+  };
+
+  // Check session status when component mounts or platform changes
+  useEffect(() => {
+    checkSessionStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform]);
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">Social Media Scraper Test</h1>
+
+        {/* Session Status Indicator (Instagram only) */}
+        {platform === "instagram" && sessionStatus && (
+          <div className={`mb-6 rounded-lg shadow-md p-4 ${
+            sessionStatus.healthy 
+              ? "bg-green-50 border border-green-200" 
+              : "bg-yellow-50 border border-yellow-200"
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className={`w-3 h-3 rounded-full ${
+                  sessionStatus.healthy ? "bg-green-500" : "bg-yellow-500"
+                }`} />
+                <div>
+                  <p className={`font-medium ${
+                    sessionStatus.healthy ? "text-green-800" : "text-yellow-800"
+                  }`}>
+                    Session Status: {sessionStatus.healthy ? "Healthy" : "Needs Refresh"}
+                  </p>
+                  <p className={`text-sm ${
+                    sessionStatus.healthy ? "text-green-600" : "text-yellow-600"
+                  }`}>
+                    {sessionStatus.message}
+                    {sessionStatus.session_age_hours !== undefined && (
+                      <span className="ml-2">
+                        (Age: {sessionStatus.session_age_hours.toFixed(1)} hours)
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleRefreshSession}
+                disabled={refreshingSession}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                {refreshingSession ? "Refreshing..." : "Refresh Session"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Input Form */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
