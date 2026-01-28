@@ -13,9 +13,19 @@
 
 ### 1. Install Playwright Browsers
 
+**Important:** Playwright browsers must be installed separately. They are automatically installed via the `postinstall` script when you run `npm install`, but if you encounter browser errors, run:
+
 ```bash
 npx playwright install chromium
 ```
+
+**For Production Servers:** If deploying to a server and browsers aren't installed, SSH into the server and run:
+```bash
+cd /path/to/your/app
+npx playwright install chromium
+```
+
+Or ensure your deployment process runs `npm install` which will trigger the `postinstall` script automatically.
 
 ### 2. Add Environment Variables to `.env.local`
 
@@ -150,6 +160,22 @@ Add `INSTAGRAM_2FA_BACKUP_CODE` to `.env.local`.
 - Check `.env.local` file permissions
 - Verify file is writable
 - Check server logs for errors
+
+### Browser Installation Error
+
+**Error:** `Executable doesn't exist at .../chromium_headless_shell-...`
+
+**Solution:** Playwright browsers are not installed on the server. Run:
+
+```bash
+npx playwright install chromium
+```
+
+**For Production:** If you can't SSH into the server, ensure your deployment process includes:
+1. Running `npm install` (which triggers the `postinstall` script)
+2. Or manually adding `npx playwright install chromium` to your deployment script
+
+**Note:** The `postinstall` script in `package.json` should automatically install browsers, but some deployment platforms may skip postinstall scripts or require explicit configuration.
 
 ## 📚 Full Documentation
 

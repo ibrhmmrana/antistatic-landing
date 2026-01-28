@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "npx playwright install chromium"
   },
   "dependencies": {
     "@aws-sdk/client-ses": "^3.975.0",
