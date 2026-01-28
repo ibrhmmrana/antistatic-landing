@@ -2,14 +2,20 @@ import Nav from "@/components/landing/Nav";
 import Hero from "@/components/landing/Hero";
 import ProductFeatures from "@/components/landing/ProductFeatures";
 import Pricing from "@/components/landing/Pricing";
+import SocialProof from "@/components/landing/SocialProof";
+import MetricsSection from "@/components/landing/MetricsSection";
+import Footer from "@/components/landing/Footer";
 import Image from "next/image";
 import Link from "next/link";
 
 export default function Home() {
   return (
     <main className="relative min-h-screen">
+      {/* Sticky Nav - outside hero container to stay sticky throughout */}
+      <Nav />
+      
       {/* Hero Section with Background */}
-      <div className="relative">
+      <div className="relative -mt-20 md:-mt-24 lg:-mt-28">
         {/* Background Gradient - only for hero */}
         <div className="absolute inset-0 z-0">
           <Image
@@ -21,42 +27,34 @@ export default function Home() {
             quality={90}
           />
         </div>
-        <div className="relative z-10">
-          <Nav />
+        <div className="relative z-10 pt-20 md:pt-24 lg:pt-28">
           <Hero />
         </div>
       </div>
 
       {/* Product Features Section with White Background */}
-      <div className="relative z-10 bg-white">
+      <div id="product" className="relative z-10 bg-white scroll-mt-24 md:scroll-mt-28 lg:scroll-mt-32">
         <ProductFeatures />
       </div>
 
       {/* Pricing Section */}
-      <div className="relative z-10 bg-white">
+      <div id="pricing" className="relative z-10 bg-white scroll-mt-24 md:scroll-mt-28 lg:scroll-mt-32">
         <Pricing />
       </div>
 
-      {/* Sticky footer links - bottom left */}
-      <div className="fixed bottom-4 left-4 z-20 flex flex-row gap-2">
-        <Link
-          href="/privacy"
-          className="text-xs text-gray-600 hover:text-gray-900 transition-colors px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-md hover:bg-white/90 shadow-sm"
-        >
-          Privacy Policy
-        </Link>
-        <Link
-          href="/terms"
-          className="text-xs text-gray-600 hover:text-gray-900 transition-colors px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-md hover:bg-white/90 shadow-sm"
-        >
-          Terms of Service
-        </Link>
-        <Link
-          href="/data-deletion"
-          className="text-xs text-gray-600 hover:text-gray-900 transition-colors px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-md hover:bg-white/90 shadow-sm"
-        >
-          Data Deletion
-        </Link>
+      {/* Social Proof Section */}
+      <div id="insights" className="relative z-10 bg-white scroll-mt-24 md:scroll-mt-28 lg:scroll-mt-32">
+        <SocialProof />
+      </div>
+
+      {/* Metrics Section */}
+      <div className="relative z-10 bg-white">
+        <MetricsSection />
+      </div>
+
+      {/* Footer */}
+      <div className="relative z-10 bg-white">
+        <Footer />
       </div>
     </main>
   );

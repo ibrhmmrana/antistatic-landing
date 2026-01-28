@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowUpRight } from "lucide-react";
 import BusinessSearch from "./BusinessSearch";
 
 export default function Hero() {
@@ -21,7 +20,7 @@ export default function Hero() {
               }}
             >
               <span className="text-sm text-gray-600 font-medium">
-                Put a finger on pulse of your digital reputation.
+                Put a finger on the pulse of your digital reputation.
               </span>
             </div>
 
@@ -45,16 +44,8 @@ export default function Hero() {
               Antistatic is active reputational intelligence with rapid response.
             </p>
 
-            {/* CTA Button */}
+            {/* Business Search */}
             <div className="pt-4">
-              <button className="group flex items-center gap-2 bg-blue-500 text-white px-6 py-3 rounded-full font-medium hover:bg-blue-600 transition-colors">
-                <span>Let's Get Started</span>
-                <ArrowUpRight className="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-              </button>
-            </div>
-
-            {/* Business Search - Hidden for now, can be shown if needed */}
-            <div className="pt-8 hidden">
               <BusinessSearch />
             </div>
           </div>

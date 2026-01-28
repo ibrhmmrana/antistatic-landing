@@ -2,7 +2,7 @@ import Image from "next/image";
 
 export default function Pricing() {
   return (
-    <section className="relative w-full pt-4 md:pt-6 lg:pt-8 pb-16 md:pb-24 lg:pb-32 bg-white">
+    <section className="relative w-full pt-4 md:pt-6 lg:pt-8 pb-12 md:pb-16 lg:pb-20 bg-white">
       <div className="w-full px-6 md:px-8 lg:px-12">
         {/* Header Section */}
         <div className="max-w-4xl mx-auto text-center mb-12 md:mb-16">
@@ -95,13 +95,14 @@ export default function Pricing() {
 
             {/* CTA Button */}
             <button
-              className="relative w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 font-medium hover:from-blue-600 hover:to-blue-700 transition-all flex items-center justify-center"
+              className="relative w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 font-medium hover:from-blue-600 hover:to-blue-700 transition-all flex items-center justify-center button-roll-text"
               style={{ borderRadius: "50px" }}
+              data-text="Start free 14-day trial"
             >
               <span>Start free 14-day trial</span>
 
               <div
-                className="absolute right-[1px] top-[1px] bottom-[1px] aspect-square flex items-center justify-center"
+                className="absolute right-[1px] top-[1px] bottom-[1px] aspect-square flex items-center justify-center button-icon-rotate"
                 style={{ borderRadius: "9999px" }}
               >
                 <Image
@@ -173,13 +174,14 @@ export default function Pricing() {
 
             {/* CTA Button */}
             <button
-              className="relative w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 font-medium hover:from-blue-600 hover:to-blue-700 transition-all flex items-center justify-center"
+              className="relative w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-3 font-medium hover:from-blue-600 hover:to-blue-700 transition-all flex items-center justify-center button-roll-text"
               style={{ borderRadius: "50px" }}
+              data-text="Start free 14-day trial"
             >
               <span>Start free 14-day trial</span>
 
               <div
-                className="absolute right-[1px] top-[1px] bottom-[1px] aspect-square flex items-center justify-center"
+                className="absolute right-[1px] top-[1px] bottom-[1px] aspect-square flex items-center justify-center button-icon-rotate"
                 style={{ borderRadius: "9999px" }}
               >
                 <Image

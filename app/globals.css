@@ -16,12 +16,26 @@
 
 html {
   font-family: var(--font-product-sans), system-ui, -apple-system, sans-serif;
+  /* Hide scrollbar */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+html::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: var(--font-product-sans), system-ui, -apple-system, sans-serif;
+  /* Hide scrollbar */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+body::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
 }
 
 /* Ensure font weights are properly mapped */
@@ -300,6 +314,22 @@ body {
   transform: translate(-50%, -50%);
 }
 
+/* Footer CTA left-aligned text positioning */
+.footer-cta-left::after {
+  left: 2rem; /* Match pl-8 = 2rem */
+  transform: translateY(150%);
+}
+
+.footer-cta-left:hover::after {
+  transform: translateY(-50%);
+}
+
+@media (min-width: 768px) {
+  .footer-cta-left::after {
+    left: 2.5rem; /* Match md:pl-10 = 2.5rem */
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .button-roll-text span,
   .button-roll-text::after {
@@ -310,6 +340,24 @@ body {
   }
   .button-roll-text:hover::after {
     transform: none;
+  }
+}
+
+/* Button icon rotation animation with bounce */
+.button-icon-rotate {
+  transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.button-roll-text:hover .button-icon-rotate {
+  transform: rotate(45deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-icon-rotate {
+    transition: none;
+  }
+  .button-roll-text:hover .button-icon-rotate {
+    transform: rotate(45deg);
   }
 }
 

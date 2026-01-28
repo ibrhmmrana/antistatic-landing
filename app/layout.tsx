@@ -50,7 +50,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={productSans.variable}>
+    <html lang="en" className={productSans.variable} style={{ scrollBehavior: 'smooth' }}>
       <body className={`${productSans.className} antialiased`}>
         {children}
       </body>

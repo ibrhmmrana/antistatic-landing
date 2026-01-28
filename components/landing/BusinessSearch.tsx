@@ -78,7 +78,7 @@ export default function BusinessSearch() {
     }
   };
 
-  const handleSelect = async (prediction: Prediction) => {
+  const handleSelect = (prediction: Prediction) => {
     setSelectedPlace(prediction);
     setInputValue(prediction.primary_text);
     setPredictions([]);
@@ -86,33 +86,6 @@ export default function BusinessSearch() {
     setHighlightedIndex(-1);
     // Prevent autocomplete from re-opening after selection
     inputRef.current?.blur();
-
-    // Generate scan ID
-    const scanId = generateScanId();
-    
-    // Trigger social media search immediately (don't wait for report page)
-    // This runs in the background and results will be available when user reaches GBP stage
-    fetch('/api/scan/socials', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        businessName: prediction.primary_text,
-        address: prediction.secondary_text,
-        scanId,
-        websiteUrl: null, // We don't have website yet, but API can still search
-      }),
-    }).catch(err => {
-      console.error('[BUSINESS-SEARCH] Failed to trigger social media search:', err);
-      // Don't block navigation if search fails
-    });
-    
-    // Navigate immediately when business is selected
-    const params = new URLSearchParams({
-      placeId: prediction.place_id,
-      name: prediction.primary_text,
-      addr: prediction.secondary_text,
-    });
-    router.push(`/report/${scanId}?${params.toString()}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -170,12 +143,29 @@ export default function BusinessSearch() {
     }
   };
 
-  const handleGetReport = () => {
-    // Navigation now happens automatically on selection
-    // This function is kept for the button, but it will only work if somehow selectedPlace exists
+  const handleGetReport = async () => {
     if (!selectedPlace) return;
 
+    // Generate scan ID
     const scanId = generateScanId();
+    
+    // Trigger social media search immediately (don't wait for report page)
+    // This runs in the background and results will be available when user reaches GBP stage
+    fetch('/api/scan/socials', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        businessName: selectedPlace.primary_text,
+        address: selectedPlace.secondary_text,
+        scanId,
+        websiteUrl: null, // We don't have website yet, but API can still search
+      }),
+    }).catch(err => {
+      console.error('[BUSINESS-SEARCH] Failed to trigger social media search:', err);
+      // Don't block navigation if search fails
+    });
+    
+    // Navigate to report page
     const params = new URLSearchParams({
       placeId: selectedPlace.place_id,
       name: selectedPlace.primary_text,
@@ -202,9 +192,9 @@ export default function BusinessSearch() {
   }, []);
 
   return (
-    <div className="relative w-full max-w-[720px] mx-auto text-left flex justify-center">
+    <div className="relative w-full max-w-[720px] mx-auto text-left flex flex-col items-start gap-4">
       {/* Search Input Wrapper - relative container for dropdown */}
-      <div className="relative inline-block">
+      <div className="relative inline-block w-full">
         <div className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 z-10">
           {isLoading ? (
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -222,35 +212,11 @@ export default function BusinessSearch() {
             if (predictions.length > 0) setIsOpen(true);
           }}
           placeholder="Find your business name"
-          className="h-16 md:h-20 pl-14 pr-[170px] md:pr-[180px] rounded-full border border-gray-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-400 text-lg"
-          style={{
-            width: inputValue 
-              ? `${Math.max(600, Math.min(800, inputValue.length * 14 + 220))}px` 
-              : '600px'
-          }}
+          className="h-16 md:h-20 w-full pl-14 pr-5 rounded-[25px] border border-gray-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 placeholder:text-gray-400 text-lg"
           aria-expanded={isOpen}
           aria-autocomplete="list"
           aria-controls="autocomplete-list"
         />
-        {/* Get Report Button - Inside search bar on the right */}
-        <button
-          onClick={handleGetReport}
-          disabled={!selectedPlace}
-          className={`absolute right-2.5 top-1/2 -translate-y-1/2 h-10 md:h-12 px-4 md:px-5 rounded-full font-medium text-sm md:text-base transition-all flex items-center gap-2 bg-blue-500 text-white ${
-            selectedPlace
-              ? "hover:bg-blue-600 shadow-md hover:shadow-lg cursor-pointer"
-              : "cursor-not-allowed"
-          }`}
-        >
-          <Image
-            src="/icons/ai icon.svg"
-            alt="AI"
-            width={18}
-            height={18}
-            className="md:w-5 md:h-5 brightness-0 invert"
-          />
-          <span className="whitespace-nowrap">Get my AI report</span>
-        </button>
 
         {/* Autocomplete Dropdown - Owner.com style: compact, left-aligned, native */}
         {isOpen && predictions.length > 0 && (() => {
@@ -331,6 +297,26 @@ export default function BusinessSearch() {
           );
         })()}
       </div>
+      
+      {/* Analyse Button - Below search bar */}
+      <button
+        onClick={handleGetReport}
+        disabled={!selectedPlace}
+        className={`h-12 md:h-14 px-8 md:px-10 rounded-[25px] font-medium text-base md:text-lg transition-all flex items-center gap-2 bg-blue-500 text-white ${
+          selectedPlace
+            ? "hover:bg-blue-600 shadow-md hover:shadow-lg cursor-pointer"
+            : "cursor-not-allowed opacity-50"
+        }`}
+      >
+        <Image
+          src="/icons/ai icon.svg"
+          alt="AI"
+          width={20}
+          height={20}
+          className="md:w-6 md:h-6 brightness-0 invert"
+        />
+        <span className="whitespace-nowrap">Analyse my business</span>
+      </button>
     </div>
   );
 }

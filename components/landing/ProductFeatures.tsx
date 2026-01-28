@@ -26,7 +26,7 @@ export default function ProductFeatures() {
               lineHeight: '1.2'
             }}
           >
-            AntiStatic <span style={{ color: '#000000' }}>Reputation-as-a-<br />Service</span> product set
+            Antistatic <span style={{ color: '#000000' }}>Reputation-as-a-<br />Service</span> product set
           </h2>
 
           {/* Subtitle */}
