@@ -507,8 +507,8 @@ export default function ReportScanClient({
         } else {
           // FIX: Even without website, we can still analyze search visibility and competitors
           // Get place details if not available
-          let placeDetailsForAnalysis = placeDetails;
-          if (!placeDetailsForAnalysis && placeId) {
+          let placeDetailsForAnalysis: any = null;
+          if (placeId) {
             try {
               const response = await fetch(`/api/places/details?placeId=${encodeURIComponent(placeId)}`);
               if (response.ok) {
@@ -530,14 +530,17 @@ export default function ReportScanClient({
                 body: JSON.stringify({
                   placeId,
                   placeName: placeDetailsForAnalysis.name,
-                  placeAddress: placeDetailsForAnalysis.formatted_address,
+                  placeAddress: placeDetailsForAnalysis.address || placeDetailsForAnalysis.formatted_address,
                   placeTypes: placeDetailsForAnalysis.types,
-                  latlng: placeDetailsForAnalysis.geometry?.location ? { 
-                    lat: placeDetailsForAnalysis.geometry.location.lat, 
-                    lng: placeDetailsForAnalysis.geometry.location.lng 
-                  } : null,
+                  latlng: placeDetailsForAnalysis.location ? { 
+                    lat: placeDetailsForAnalysis.location.lat, 
+                    lng: placeDetailsForAnalysis.location.lng 
+                  } : (placeDetailsForAnalysis.geometry?.location ? {
+                    lat: placeDetailsForAnalysis.geometry.location.lat,
+                    lng: placeDetailsForAnalysis.geometry.location.lng
+                  } : null),
                   rating: placeDetailsForAnalysis.rating,
-                  reviewCount: placeDetailsForAnalysis.user_ratings_total,
+                  reviewCount: placeDetailsForAnalysis.userRatingsTotal || placeDetailsForAnalysis.user_ratings_total,
                 }),
               })
                 .then(res => res.json())
