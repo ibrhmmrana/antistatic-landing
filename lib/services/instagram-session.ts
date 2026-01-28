@@ -95,9 +95,7 @@ export class InstagramSessionService {
       
       // Use serverless Chromium on Vercel/serverless, regular Playwright locally
       if (isServerless) {
-        // Configure Chromium for serverless
-        chromium.setGraphicsMode(false);
-        
+        // Use serverless Chromium (bundled binary, no installation needed)
         browser = await playwrightChromium.launch({
           args: chromium.args,
           executablePath: await chromium.executablePath(),
