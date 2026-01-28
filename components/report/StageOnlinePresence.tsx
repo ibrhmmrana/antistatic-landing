@@ -585,21 +585,22 @@ export default function StageOnlinePresence({
   const instagramLink = data?.socialLinks.find(link => link.platform === 'instagram');
   const facebookLink = data?.socialLinks.find(link => link.platform === 'facebook');
   
-  // Determine which social links we have (show if URL exists, even without screenshot)
-  const hasWebsite = !!(data?.websiteScreenshot || data?.websiteUrl);
-  const hasInstagram = !!(instagramLink?.url); // Changed: show if URL exists
-  const hasFacebook = !!(facebookLink?.url); // Changed: show if URL exists
-  
-  // Track if screenshots are still loading (URL exists but no screenshot yet, status is 'pending')
-  const instagramIsLoading = !!(instagramLink?.url && !instagramLink?.screenshot && instagramLink?.status === 'pending');
-  const facebookIsLoading = !!(facebookLink?.url && !facebookLink?.screenshot && facebookLink?.status === 'pending');
-  
   // Track if screenshots failed or were detected but couldn't be captured
   // 'error' = explicit failure, 'detected' = platform found but screenshot failed
   const instagramScreenshotFailed = !!(instagramLink?.url && !instagramLink?.screenshot && 
     (instagramLink?.status === 'error' || instagramLink?.status === 'detected'));
   const facebookScreenshotFailed = !!(facebookLink?.url && !facebookLink?.screenshot && 
     (facebookLink?.status === 'error' || facebookLink?.status === 'detected'));
+  
+  // Determine which social links we have (show only if URL exists AND screenshot is available or still loading)
+  // Don't show if screenshot failed - hide the mockup completely
+  const hasWebsite = !!(data?.websiteScreenshot || (data?.websiteUrl && !screenshotError));
+  const hasInstagram = !!(instagramLink?.url && !instagramScreenshotFailed);
+  const hasFacebook = !!(facebookLink?.url && !facebookScreenshotFailed);
+  
+  // Track if screenshots are still loading (URL exists but no screenshot yet, status is 'pending')
+  const instagramIsLoading = !!(instagramLink?.url && !instagramLink?.screenshot && instagramLink?.status === 'pending' && !instagramScreenshotFailed);
+  const facebookIsLoading = !!(facebookLink?.url && !facebookLink?.screenshot && facebookLink?.status === 'pending' && !facebookScreenshotFailed);
   
   // Count available items (website or social links with URL)
   const screenshotCount = [hasWebsite, hasInstagram, hasFacebook].filter(Boolean).length;

@@ -414,7 +414,7 @@ export default function EmailVerificationModal({
               <button
                 onClick={handleSendCode}
                 disabled={loading || !email}
-                className="relative w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 button-roll-text button-roll-text-with-icon"
+                className={`relative w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${loading ? '' : 'button-roll-text button-roll-text-with-icon'}`}
                 data-text="Send Code"
               >
                 {loading ? (
