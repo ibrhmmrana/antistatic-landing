@@ -203,58 +203,83 @@ export class InstagramSessionService {
         throw new Error('Could not find password input field.');
       }
       
-      // Fill username and password
+      // Fill username and password with human-like delays
       await page.fill(usernameSelector, username);
+      await page.waitForTimeout(500); // Small delay between fields
       await page.fill(passwordSelector, password);
+      await page.waitForTimeout(1000); // Wait before submitting (more human-like)
 
       // Step 4: Submit form
       console.log('[SESSION] Submitting login form...');
       
-      // Try to find and click the submit button
-      // Based on Instagram's current structure: div[role="none"] containing span with "Log in" text
-      let submitButtonFound = false;
+      // Try multiple approaches to submit the form
+      let formSubmitted = false;
       
+      // Approach 1: Try to submit the form directly (most reliable)
       try {
-        // First, try to find the span containing "Log in" text
-        const loginSpan = await page.waitForSelector('span:has-text("Log in"), span:has-text("Log In")', { 
-          timeout: 5000, 
-          state: 'visible' 
-        });
-        
-        if (loginSpan) {
-          console.log('[SESSION] Found "Log in" span, finding clickable parent...');
-          
-          // Find the clickable parent div[role="none"] that contains the span
-          const clickableParent = await loginSpan.evaluateHandle((el) => {
-            let parent = el.parentElement;
-            while (parent && parent !== document.body) {
-              // Look for the div[role="none"] with class x1ja2u2z (from user's HTML structure)
-              if (parent.getAttribute('role') === 'none' && parent.classList.contains('x1ja2u2z')) {
-                return parent;
-              }
-              parent = parent.parentElement;
-            }
-            // Fallback: return the span's immediate parent
-            return el.parentElement || el;
-          });
-          
-          const parentElement = await clickableParent.asElement();
-          if (parentElement) {
-            console.log('[SESSION] Clicking parent div[role="none"] element...');
-            await parentElement.click();
-            submitButtonFound = true;
-          } else {
-            // Fallback: click the span itself
-            await loginSpan.click();
-            submitButtonFound = true;
-          }
+        const form = await page.$('form');
+        if (form) {
+          console.log('[SESSION] Found form, submitting directly...');
+          await Promise.all([
+            page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
+            form.evaluate((f: HTMLFormElement) => f.submit()),
+          ]);
+          formSubmitted = true;
         }
       } catch (e) {
-        console.log('[SESSION] Could not find "Log in" span, trying alternative selectors...');
+        console.log('[SESSION] Form submission failed, trying button click...');
       }
       
-      // Fallback to standard button selectors
-      if (!submitButtonFound) {
+      // Approach 2: Click the submit button
+      if (!formSubmitted) {
+        try {
+          // First, try to find the span containing "Log in" text
+          const loginSpan = await page.waitForSelector('span:has-text("Log in"), span:has-text("Log In")', { 
+            timeout: 5000, 
+            state: 'visible' 
+          });
+          
+          if (loginSpan) {
+            console.log('[SESSION] Found "Log in" span, finding clickable parent...');
+            
+            // Find the clickable parent div[role="none"] that contains the span
+            const clickableParent = await loginSpan.evaluateHandle((el) => {
+              let parent = el.parentElement;
+              while (parent && parent !== document.body) {
+                // Look for the div[role="none"] with class x1ja2u2z (from user's HTML structure)
+                if (parent.getAttribute('role') === 'none' && parent.classList.contains('x1ja2u2z')) {
+                  return parent;
+                }
+                parent = parent.parentElement;
+              }
+              // Fallback: return the span's immediate parent
+              return el.parentElement || el;
+            });
+            
+            const parentElement = await clickableParent.asElement();
+            if (parentElement) {
+              console.log('[SESSION] Clicking parent div[role="none"] element...');
+              await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
+                parentElement.click(),
+              ]);
+              formSubmitted = true;
+            } else {
+              // Fallback: click the span itself
+              await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
+                loginSpan.click(),
+              ]);
+              formSubmitted = true;
+            }
+          }
+        } catch (e) {
+          console.log('[SESSION] Could not find "Log in" span, trying alternative selectors...');
+        }
+      }
+      
+      // Approach 3: Fallback to standard button selectors
+      if (!formSubmitted) {
         const submitSelectors = [
           'button[type="submit"]',
           'button:has-text("Log in")',
@@ -267,8 +292,11 @@ export class InstagramSessionService {
           try {
             await page.waitForSelector(selector, { timeout: 3000, state: 'visible' });
             console.log(`[SESSION] Found submit button with selector: ${selector}`);
-            await page.click(selector);
-            submitButtonFound = true;
+            await Promise.all([
+              page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
+              page.click(selector),
+            ]);
+            formSubmitted = true;
             break;
           } catch (e) {
             continue;
@@ -276,18 +304,85 @@ export class InstagramSessionService {
         }
       }
       
-      if (!submitButtonFound) {
-        throw new Error('Could not find submit button. Instagram may have changed their login page structure.');
+      if (!formSubmitted) {
+        throw new Error('Could not find submit button or form. Instagram may have changed their login page structure.');
       }
       
-      // Wait for navigation after clicking
-      try {
-        await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 });
-      } catch (e) {
-        console.log('[SESSION] Navigation timeout, but continuing...');
+      // Wait a bit for the page to process and check for errors or navigation
+      await page.waitForTimeout(3000);
+      
+      // Check for error messages on the page
+      const errorMessages = await page.evaluate(() => {
+        const errorSelectors = [
+          '[role="alert"]',
+          '.error',
+          '[class*="error"]',
+          '[id*="error"]',
+          'div:has-text("Sorry")',
+          'div:has-text("incorrect")',
+          'div:has-text("wrong")',
+          'div:has-text("Try again")',
+          'div:has-text("suspended")',
+        ];
+        
+        const errors: string[] = [];
+        for (const selector of errorSelectors) {
+          try {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach((el) => {
+              if (el.textContent && el.textContent.trim()) {
+                errors.push(el.textContent.trim());
+              }
+            });
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        // Also check for any visible error text
+        const allText = document.body.innerText || '';
+        if (allText.includes('Sorry') || allText.includes('incorrect') || allText.includes('wrong password')) {
+          const errorDivs = Array.from(document.querySelectorAll('div')).filter(
+            (div) => div.textContent && (div.textContent.includes('Sorry') || div.textContent.includes('incorrect'))
+          );
+          errorDivs.forEach((div) => {
+            if (div.textContent) errors.push(div.textContent.trim());
+          });
+        }
+        
+        return errors.length > 0 ? errors.join(' | ') : null;
+      });
+      
+      if (errorMessages) {
+        console.log(`[SESSION] Error message detected on page: ${errorMessages}`);
+        throw new Error(`Login error: ${errorMessages}`);
       }
-
-      // Step 5: Handle 2FA if required
+      
+      // Step 5: Check for CAPTCHA or challenges before checking 2FA
+      const captchaCheck = await page.evaluate(() => {
+        return {
+          url: window.location.href,
+          hasCaptcha: document.querySelector('iframe[src*="recaptcha"]') !== null || 
+                     document.querySelector('[class*="captcha"]') !== null ||
+                     document.body.innerText.includes('captcha') ||
+                     document.body.innerText.includes('verify') ||
+                     document.body.innerText.includes('suspicious'),
+          bodyText: document.body.innerText.substring(0, 1000),
+        };
+      });
+      
+      if (captchaCheck.hasCaptcha) {
+        console.log('[SESSION] CAPTCHA or verification challenge detected');
+        console.log('[SESSION] Page content snippet:', captchaCheck.bodyText.substring(0, 500));
+        return {
+          success: false,
+          error: 'CAPTCHA or verification challenge detected. Manual intervention required.',
+          steps: { ...steps, login: 'captcha_required' },
+          duration_ms: Date.now() - startTime,
+        };
+      }
+      
+      // Step 6: Handle 2FA if required
       const currentUrl = page.url();
       if (currentUrl.includes('/accounts/two_factor') || currentUrl.includes('/challenge')) {
         console.log('[SESSION] 2FA challenge detected...');
@@ -318,12 +413,31 @@ export class InstagramSessionService {
         }
       }
 
-      // Step 6: Check if login was successful
+      // Step 7: Check if login was successful
       const finalUrl = page.url();
-      if (finalUrl.includes('/accounts/login') || finalUrl.includes('/challenge')) {
+      console.log(`[SESSION] Final URL after login attempt: ${finalUrl}`);
+      
+      if (finalUrl.includes('/accounts/login') && !finalUrl.includes('/accounts/two_factor')) {
+        // Still on login page - get more details
+        const loginPageDetails = await page.evaluate(() => {
+          const errorElements = Array.from(document.querySelectorAll('[role="alert"], .error, [class*="error"]'));
+          const errorTexts = errorElements.map(el => el.textContent?.trim()).filter(Boolean);
+          return {
+            errorMessages: errorTexts,
+            formVisible: document.querySelector('form') !== null,
+            pageTitle: document.title,
+          };
+        });
+        
+        console.log('[SESSION] Login page details:', JSON.stringify(loginPageDetails, null, 2));
+        
+        const errorMsg = loginPageDetails.errorMessages.length > 0 
+          ? loginPageDetails.errorMessages.join('; ')
+          : 'Login failed - still on login page. Check credentials or handle 2FA manually.';
+        
         return {
           success: false,
-          error: 'Login failed - still on login page. Check credentials or handle 2FA manually.',
+          error: errorMsg,
           steps: { ...steps, login: 'failed' },
           duration_ms: Date.now() - startTime,
         };
