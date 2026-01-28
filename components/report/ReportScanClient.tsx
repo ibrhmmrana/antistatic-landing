@@ -1230,7 +1230,6 @@ export default function ReportScanClient({
         }}
         placeId={placeId}
         placeName={name}
-        prefilledUsernames={gbpExtractedUsernames || undefined}
       />
     </div>
   );
