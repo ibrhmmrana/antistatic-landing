@@ -123,7 +123,6 @@ export class InstagramSessionService {
         console.log(`[SESSION] AWS_LAMBDA_FUNCTION_MEMORY_SIZE: ${process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || 'unknown'} MB`);
         console.log(`[SESSION] INSTAGRAM_AUTOMATION_HEADLESS: ${process.env.INSTAGRAM_AUTOMATION_HEADLESS || 'not set'}`);
         console.log(`[SESSION] Chromium args count: ${chromium.args.length}`);
-        console.log(`[SESSION] Chromium revision: ${chromium.revision || 'unknown'}`);
       }
       
       // Determine headless mode - FORCE headless in serverless environments
