@@ -3,7 +3,7 @@
  * Handles automatic login, session extraction, validation, and webhook integration
  */
 
-import { chromium as playwrightChromium, Browser, BrowserContext, Page } from 'playwright-core';
+import { chromium as pwChromium, Browser, BrowserContext, Page } from 'playwright-core';
 import chromium from '@sparticuz/chromium';
 
 export interface InstagramSession {
@@ -19,17 +19,6 @@ export interface SessionRefreshResult {
   success: boolean;
   session?: InstagramSession;
   error?: string;
-  diagnostics?: {
-    errorMessages?: string[];
-    formVisible?: boolean;
-    usernameFieldVisible?: boolean;
-    passwordFieldVisible?: boolean;
-    has2FAPrompt?: boolean;
-    pageTitle?: string;
-    url?: string;
-    bodyTextSample?: string;
-    screenshot_available?: boolean;
-  };
   steps?: {
     browser_launch?: string;
     login?: string;
@@ -92,38 +81,38 @@ export class InstagramSessionService {
 
     try {
       // Step 1: Launch browser
-      // Check if we're in a serverless environment (Vercel)
-      const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV;
-      const isServerless = isVercel || process.env.AWS_LAMBDA_FUNCTION_NAME;
-      
       // Check if headful mode is enabled (useful for debugging)
-      // Note: Headful mode doesn't work on serverless environments, so force headless
       const envValue = process.env.INSTAGRAM_AUTOMATION_HEADLESS;
-      const headlessMode = isServerless ? true : (envValue !== 'false'); // Force headless on serverless
+      const headlessMode = envValue !== 'false'; // 'false' string means headful (visible browser)
       const modeText = headlessMode ? 'headless' : 'headful';
-      console.log(`[SESSION] Environment: isServerless=${isServerless}, INSTAGRAM_AUTOMATION_HEADLESS="${envValue}"`);
+      console.log(`[SESSION] Environment INSTAGRAM_AUTOMATION_HEADLESS="${envValue}"`);
       console.log(`[SESSION] Launching ${modeText} browser (headless=${headlessMode})...`);
       
-      // Use serverless Chromium on Vercel/serverless, regular Playwright locally
-      if (isServerless) {
-        // Use serverless Chromium (bundled binary, no installation needed)
-        browser = await playwrightChromium.launch({
-          args: chromium.args,
-          executablePath: await chromium.executablePath(),
-          headless: true, // Always headless on serverless
-        });
-      } else {
-        // Local development: use regular Playwright
-        browser = await playwrightChromium.launch({
-          headless: headlessMode,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-blink-features=AutomationControlled',
-            '--disable-dev-shm-usage',
-          ],
-        });
-      }
+      // Detect serverless environment (Vercel, AWS Lambda, etc.)
+      const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.FUNCTION_TARGET;
+      const localExecutablePath = process.env.CHROME_EXECUTABLE_PATH;
+      
+      // Use serverless-compatible Chromium if in serverless environment
+      const executablePath = isServerless
+        ? await chromium.executablePath()
+        : (localExecutablePath || undefined);
+      
+      console.log(`[SESSION] Serverless environment: ${isServerless}, executable path: ${executablePath || 'default'}`);
+      
+      browser = await pwChromium.launch({
+        headless: headlessMode,
+        args: [
+          ...(isServerless ? chromium.args : []),
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-dev-shm-usage',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+        ],
+        executablePath,
+        timeout: 60000,
+      });
 
       context = await browser.newContext({
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -144,384 +133,161 @@ export class InstagramSessionService {
       page = await context.newPage();
       steps.browser_launch = 'success';
 
-      // Step 2: Navigate to Instagram login with proper wait conditions
+      // Step 2: Navigate to Instagram login
       console.log('[SESSION] Navigating to Instagram login...');
-      
-      // Navigate and wait for DOM to be ready
       await page.goto('https://www.instagram.com/accounts/login/', {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle',
         timeout: 30000,
       });
 
-      // Wait for page to actually load content (Instagram loads dynamically)
-      console.log('[SESSION] Waiting for page content to load...');
-      
-      // Wait for either the login form or any content to appear
-      try {
-        await Promise.race([
-          page.waitForSelector('input[name="username"], input[type="text"]', { timeout: 15000 }),
-          page.waitForSelector('body', { state: 'attached', timeout: 5000 }),
-        ]);
-      } catch (e) {
-        console.log('[SESSION] ⚠️ Initial wait timeout, checking page state...');
-      }
-      
-      // Additional wait for JavaScript to execute
-      await page.waitForTimeout(3000);
-      
-      // Check if page has actual content
-      const pageContent = await page.evaluate(() => {
-        return {
-          bodyHTML: document.body.innerHTML,
-          bodyText: document.body.innerText,
-          hasScripts: document.querySelectorAll('script').length,
-          title: document.title,
-        };
-      });
-      
-      console.log(`[SESSION] Page state - Title: "${pageContent.title}", Scripts: ${pageContent.hasScripts}, Body length: ${pageContent.bodyHTML.length}`);
-      
-      // If page is empty, Instagram might be blocking or JavaScript isn't executing
-      if (pageContent.bodyHTML.length < 100 && pageContent.hasScripts === 0) {
-        console.log('[SESSION] ❌ Page appears empty - Instagram may be blocking or JavaScript disabled');
-        throw new Error('Instagram page loaded but appears empty. This may indicate: 1) Instagram is blocking automation, 2) JavaScript is not executing, 3) Rate limiting. Try again later or check account status.');
-      }
-      
-      if (pageContent.bodyHTML.length < 100) {
-        console.log('[SESSION] ⚠️ Page content is minimal, waiting longer for dynamic content...');
-        await page.waitForTimeout(5000);
-        
-        // Try waiting for specific Instagram elements
-        try {
-          await page.waitForSelector('input, form, [role="main"]', { timeout: 10000 });
-        } catch (e) {
-          console.log('[SESSION] ⚠️ Still no content after extended wait');
-        }
-      }
-
-      // Check if page is available (Instagram sometimes shows "Page isn't available")
-      const pageTitle = await page.title();
-      const pageUrl = page.url();
-      console.log(`[SESSION] Page loaded - Title: "${pageTitle}", URL: ${pageUrl}`);
-      
-      if (pageTitle.includes("isn't available") || pageTitle.includes("Error") || pageTitle.includes("Page not found")) {
-        console.log('[SESSION] ❌ Instagram shows error page, attempting refresh...');
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(3000);
-        const newTitle = await page.title();
-        if (newTitle.includes("isn't available")) {
-          throw new Error(`Instagram page unavailable: "${newTitle}". This may indicate rate limiting or account issues.`);
-        }
-      }
-      
-      // Final check: ensure we have actual content before proceeding
-      const finalContentCheck = await page.evaluate(() => document.body.innerHTML.length);
-      if (finalContentCheck < 100) {
-        // Try one more time with a longer wait - Instagram's React app might be slow to load
-        console.log('[SESSION] ⚠️ Page still empty, waiting for React app to load...');
-        await page.waitForTimeout(5000);
-        
-        // Check if React has loaded (Instagram uses React)
-        const reactLoaded = await page.evaluate(() => {
-          // Check for React root or Instagram's app container
-          return !!(
-            document.querySelector('#react-root') ||
-            document.querySelector('[id*="react"]') ||
-            document.querySelector('input[name="username"]') ||
-            document.body.innerHTML.length > 100
-          );
-        });
-        
-        if (!reactLoaded) {
-          // Log what we can see
-          const debugInfo = await page.evaluate(() => {
-            return {
-              bodyHTML: document.body.innerHTML,
-              scripts: Array.from(document.querySelectorAll('script')).map(s => s.src || 'inline'),
-              metaTags: Array.from(document.querySelectorAll('meta')).map(m => m.getAttribute('name') || m.getAttribute('property')),
-            };
-          });
-          console.log('[SESSION] ❌ React app not loaded. Debug info:', JSON.stringify(debugInfo, null, 2));
-          throw new Error('Instagram page is still empty after extended wait. This may indicate: 1) Instagram is blocking automation, 2) JavaScript execution issues in serverless environment, 3) Rate limiting. Try again later or use a different approach.');
-        }
-      }
-
-      // Step 3: Fill login form with robust selectors and human-like behavior
-      console.log('[SESSION] 🔍 Looking for login form...');
-      
-      // Try multiple username field selectors (Instagram's actual selectors)
+      // Step 3: Fill login form
+      console.log('[SESSION] Filling login form...');
+      // Try multiple selectors for username field (Instagram may change their HTML)
       const usernameSelectors = [
-        'input[name="username"]', // Instagram's primary selector
-        'input[autocomplete="username"]',
-        'input[type="text"][aria-label*="Phone number" i]',
-        'input[type="text"][aria-label*="Username" i]',
-        'input[type="text"]:not([type="password"])',
+        'input[name="username"]',
+        'input[type="text"]',
         'input[placeholder*="username" i]',
         'input[placeholder*="phone" i]',
+        'input[aria-label*="username" i]',
+        'input[aria-label*="phone" i]',
       ];
       
-      let usernameField = null;
       let usernameSelector = '';
+      let usernameFieldFound = false;
       for (const selector of usernameSelectors) {
         try {
-          usernameField = await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
-          if (usernameField) {
-            usernameSelector = selector;
-            console.log(`[SESSION] ✅ Found username field with selector: ${selector}`);
-            break;
-          }
+          await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
+          usernameSelector = selector;
+          usernameFieldFound = true;
+          console.log(`[SESSION] Found username field with selector: ${selector}`);
+          break;
         } catch (e) {
+          // Try next selector
           continue;
         }
       }
       
-      if (!usernameField) {
-        // Log page content for debugging
-        const pageContent = await page.content().catch(() => '');
-        const pageText = await page.textContent('body').catch(() => '');
-        console.log('[SESSION] ❌ Could not find username field');
-        console.log('[SESSION] Page HTML snippet:', pageContent.substring(0, 1000));
-        console.log('[SESSION] Page text snippet:', pageText?.substring(0, 500));
-        throw new Error('Could not find username input field. Instagram may have changed their login page structure or the page is blocked.');
+      if (!usernameFieldFound) {
+        // If headful mode, wait longer and show page content for debugging
+        if (!headlessMode) {
+          console.log('[SESSION] Username field not found, waiting 5 more seconds in headful mode...');
+          await page.waitForTimeout(5000);
+          const pageContent = await page.content();
+          console.log('[SESSION] Page HTML snippet:', pageContent.substring(0, 500));
+        }
+        throw new Error('Could not find username input field. Instagram may have changed their login page structure.');
       }
       
-      // Find password field with robust selectors
+      // Find password field similarly
       const passwordSelectors = [
-        'input[name="password"]', // Instagram's primary selector
+        'input[name="password"]',
         'input[type="password"]',
-        'input[autocomplete="current-password"]',
         'input[aria-label*="password" i]',
       ];
       
-      let passwordField = null;
       let passwordSelector = '';
+      let passwordFieldFound = false;
       for (const selector of passwordSelectors) {
         try {
-          passwordField = await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
-          if (passwordField) {
-            passwordSelector = selector;
-            console.log(`[SESSION] ✅ Found password field with selector: ${selector}`);
-            break;
-          }
+          await page.waitForSelector(selector, { timeout: 5000, state: 'visible' });
+          passwordSelector = selector;
+          passwordFieldFound = true;
+          console.log(`[SESSION] Found password field with selector: ${selector}`);
+          break;
         } catch (e) {
           continue;
         }
       }
       
-      if (!passwordField) {
+      if (!passwordFieldFound) {
         throw new Error('Could not find password input field.');
       }
       
-      // Fill username with human-like typing
-      console.log('[SESSION] 📝 Filling username...');
-      await usernameField.click({ clickCount: 3 }); // Select all if there's existing text
-      await usernameField.press('Backspace');
-      await page.waitForTimeout(500 + Math.random() * 500); // Random delay 500-1000ms
-      await usernameField.type(username, { delay: 50 + Math.random() * 50 }); // Type with random delays
-      
-      // Small delay between fields
-      await page.waitForTimeout(300 + Math.random() * 300);
-      
-      // Fill password with human-like typing
-      console.log('[SESSION] 📝 Filling password...');
-      await passwordField.click();
-      await page.waitForTimeout(200 + Math.random() * 200);
-      await passwordField.type(password, { delay: 30 + Math.random() * 30 }); // Type with random delays
-      
-      // Wait before submitting (more human-like)
-      await page.waitForTimeout(1000 + Math.random() * 1000);
+      // Fill username and password
+      await page.fill(usernameSelector, username);
+      await page.fill(passwordSelector, password);
 
-      // Step 4: Submit form with multiple fallback methods
-      console.log('[SESSION] 🚀 Submitting login form...');
+      // Step 4: Submit form
+      console.log('[SESSION] Submitting login form...');
       
-      let formSubmitted = false;
+      // Try to find and click the submit button
+      // Based on Instagram's current structure: div[role="none"] containing span with "Log in" text
+      let submitButtonFound = false;
       
-      // Helper function to check for Instagram errors
-      const checkForInstagramErrors = async (): Promise<string | null> => {
-        const errorInfo = await page.evaluate(() => {
-          const errorSelectors = [
-            '[role="alert"]',
-            'p[data-testid="login-error-message"]',
-            '#slfErrorAlert',
-            'div.error',
-            '[class*="error"]',
-            '[id*="error"]',
-          ];
-          
-          const errors: string[] = [];
-          for (const selector of errorSelectors) {
-            try {
-              const elements = document.querySelectorAll(selector);
-              elements.forEach((el) => {
-                if (el.textContent && el.textContent.trim()) {
-                  errors.push(el.textContent.trim());
-                }
-              });
-            } catch (e) {
-              continue;
-            }
-          }
-          
-          // Check page content for error keywords
-          const pageText = document.body.innerText || '';
-          const errorKeywords = [
-            'try again later',
-            'too many attempts',
-            'suspended',
-            'temporarily blocked',
-            'incorrect password',
-            'problem logging in',
-            'sorry',
-            'wrong',
-            'incorrect',
-          ];
-          
-          for (const keyword of errorKeywords) {
-            if (pageText.toLowerCase().includes(keyword)) {
-              // Find the containing element
-              const errorDivs = Array.from(document.querySelectorAll('div')).filter(
-                (div) => div.textContent && div.textContent.toLowerCase().includes(keyword)
-              );
-              errorDivs.forEach((div) => {
-                if (div.textContent && div.textContent.trim().length < 200) {
-                  errors.push(div.textContent.trim());
-                }
-              });
-            }
-          }
-          
-          return errors.length > 0 ? errors.join(' | ') : null;
+      try {
+        // First, try to find the span containing "Log in" text
+        const loginSpan = await page.waitForSelector('span:has-text("Log in"), span:has-text("Log In")', { 
+          timeout: 5000, 
+          state: 'visible' 
         });
         
-        return errorInfo;
-      };
-      
-      // Approach 1: Try standard submit button (most reliable)
-      const submitSelectors = [
-        'button[type="submit"]',
-        'button:has-text("Log In")',
-        'button:has-text("Log in")',
-        'div[role="button"][tabindex="0"]',
-        'form button',
-      ];
-      
-      for (const selector of submitSelectors) {
-        try {
-          const submitButton = await page.$(selector);
-          if (submitButton && await submitButton.isVisible()) {
-            console.log(`[SESSION] ✅ Clicking submit button: ${selector}`);
-            await Promise.all([
-              page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
-              submitButton.click(),
-            ]);
-            formSubmitted = true;
-            break;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      // Approach 2: Try finding "Log in" span and clicking parent
-      if (!formSubmitted) {
-        try {
-          const loginSpan = await page.waitForSelector('span:has-text("Log in"), span:has-text("Log In")', { 
-            timeout: 3000, 
-            state: 'visible' 
+        if (loginSpan) {
+          console.log('[SESSION] Found "Log in" span, finding clickable parent...');
+          
+          // Find the clickable parent div[role="none"] that contains the span
+          const clickableParent = await loginSpan.evaluateHandle((el) => {
+            let parent = el.parentElement;
+            while (parent && parent !== document.body) {
+              // Look for the div[role="none"] with class x1ja2u2z (from user's HTML structure)
+              if (parent.getAttribute('role') === 'none' && parent.classList.contains('x1ja2u2z')) {
+                return parent;
+              }
+              parent = parent.parentElement;
+            }
+            // Fallback: return the span's immediate parent
+            return el.parentElement || el;
           });
           
-          if (loginSpan) {
-            console.log('[SESSION] ✅ Found "Log in" span, clicking parent...');
-            const clickableParent = await loginSpan.evaluateHandle((el) => {
-              let parent = el.parentElement;
-              while (parent && parent !== document.body) {
-                if (parent.getAttribute('role') === 'none' && parent.classList.contains('x1ja2u2z')) {
-                  return parent;
-                }
-                parent = parent.parentElement;
-              }
-              return el.parentElement || el;
-            });
-            
-            const parentElement = await clickableParent.asElement();
-            if (parentElement) {
-              await Promise.all([
-                page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
-                parentElement.click(),
-              ]);
-              formSubmitted = true;
-            }
+          const parentElement = await clickableParent.asElement();
+          if (parentElement) {
+            console.log('[SESSION] Clicking parent div[role="none"] element...');
+            await parentElement.click();
+            submitButtonFound = true;
+          } else {
+            // Fallback: click the span itself
+            await loginSpan.click();
+            submitButtonFound = true;
           }
-        } catch (e) {
-          console.log('[SESSION] Could not find "Log in" span, trying form submit...');
+        }
+      } catch (e) {
+        console.log('[SESSION] Could not find "Log in" span, trying alternative selectors...');
+      }
+      
+      // Fallback to standard button selectors
+      if (!submitButtonFound) {
+        const submitSelectors = [
+          'button[type="submit"]',
+          'button:has-text("Log in")',
+          'button:has-text("Log In")',
+          'button:has-text("Sign in")',
+          'form button',
+        ];
+        
+        for (const selector of submitSelectors) {
+          try {
+            await page.waitForSelector(selector, { timeout: 3000, state: 'visible' });
+            console.log(`[SESSION] Found submit button with selector: ${selector}`);
+            await page.click(selector);
+            submitButtonFound = true;
+            break;
+          } catch (e) {
+            continue;
+          }
         }
       }
       
-      // Approach 3: Try form.submit()
-      if (!formSubmitted) {
-        try {
-          const form = await page.$('form');
-          if (form) {
-            console.log('[SESSION] ✅ Submitting form directly...');
-            await Promise.all([
-              page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
-              form.evaluate((f: HTMLFormElement) => f.submit()),
-            ]);
-            formSubmitted = true;
-          }
-        } catch (e) {
-          console.log('[SESSION] Form submit failed, trying Enter key...');
-        }
+      if (!submitButtonFound) {
+        throw new Error('Could not find submit button. Instagram may have changed their login page structure.');
       }
       
-      // Approach 4: Press Enter on password field (last resort)
-      if (!formSubmitted) {
-        console.log('[SESSION] ⚠️ No submit button found, pressing Enter on password field...');
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
-          passwordField.press('Enter'),
-        ]);
-        formSubmitted = true;
+      // Wait for navigation after clicking
+      try {
+        await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 });
+      } catch (e) {
+        console.log('[SESSION] Navigation timeout, but continuing...');
       }
-      
-      // Wait for page to process
-      await page.waitForTimeout(3000);
-      
-      // Check for errors immediately after submission
-      const errorMessages = await checkForInstagramErrors();
-      if (errorMessages) {
-        console.log(`[SESSION] ❌ Error detected after submission: ${errorMessages}`);
-        // Log page state for debugging
-        const pageText = await page.textContent('body').catch(() => '');
-        console.log('[SESSION] Page text after error:', pageText?.substring(0, 500));
-        throw new Error(`Login error: ${errorMessages}`);
-      }
-      
-      // Step 5: Check for CAPTCHA or challenges before checking 2FA
-      const captchaCheck = await page.evaluate(() => {
-        return {
-          url: window.location.href,
-          hasCaptcha: document.querySelector('iframe[src*="recaptcha"]') !== null || 
-                     document.querySelector('[class*="captcha"]') !== null ||
-                     document.body.innerText.includes('captcha') ||
-                     document.body.innerText.includes('verify') ||
-                     document.body.innerText.includes('suspicious'),
-          bodyText: document.body.innerText.substring(0, 1000),
-        };
-      });
-      
-      if (captchaCheck.hasCaptcha) {
-        console.log('[SESSION] CAPTCHA or verification challenge detected');
-        console.log('[SESSION] Page content snippet:', captchaCheck.bodyText.substring(0, 500));
-        return {
-          success: false,
-          error: 'CAPTCHA or verification challenge detected. Manual intervention required.',
-          steps: { ...steps, login: 'captcha_required' },
-          duration_ms: Date.now() - startTime,
-        };
-      }
-      
-      // Step 6: Handle 2FA if required
+
+      // Step 5: Handle 2FA if required
       const currentUrl = page.url();
       if (currentUrl.includes('/accounts/two_factor') || currentUrl.includes('/challenge')) {
         console.log('[SESSION] 2FA challenge detected...');
@@ -552,54 +318,12 @@ export class InstagramSessionService {
         }
       }
 
-      // Step 7: Check if login was successful with detailed diagnostics
+      // Step 6: Check if login was successful
       const finalUrl = page.url();
-      const finalTitle = await page.title();
-      console.log(`[SESSION] 🔍 Final check - URL: ${finalUrl}, Title: "${finalTitle}"`);
-      
-      if (finalUrl.includes('/accounts/login') && !finalUrl.includes('/accounts/two_factor')) {
-        // Still on login page - gather comprehensive diagnostics
-        const diagnostics = await page.evaluate(() => {
-          const errorElements = Array.from(document.querySelectorAll('[role="alert"], .error, [class*="error"], p[data-testid="login-error-message"], #slfErrorAlert'));
-          const errorTexts = errorElements.map(el => el.textContent?.trim()).filter(Boolean);
-          
-          return {
-            errorMessages: errorTexts,
-            formVisible: document.querySelector('form') !== null,
-            usernameFieldVisible: document.querySelector('input[name="username"]') !== null,
-            passwordFieldVisible: document.querySelector('input[name="password"]') !== null,
-            has2FAPrompt: document.querySelector('input[name="verificationCode"]') !== null,
-            pageTitle: document.title,
-            url: window.location.href,
-            bodyTextSample: document.body.innerText.substring(0, 500),
-          };
-        });
-        
-        console.log('[SESSION] ❌ Login failed - Diagnostics:', JSON.stringify(diagnostics, null, 2));
-        
-        // Build comprehensive error message
-        let errorMsg = 'Login failed - still on login page. ';
-        
-        if (diagnostics.errorMessages.length > 0) {
-          errorMsg += `Instagram errors: ${diagnostics.errorMessages.join('; ')}. `;
-        }
-        
-        if (finalTitle.includes("isn't available")) {
-          errorMsg += `Page shows "${finalTitle}" - Instagram may be blocking the request or rate limiting. `;
-        }
-        
-        if (diagnostics.has2FAPrompt) {
-          errorMsg += '2FA challenge detected. ';
-        }
-        
-        errorMsg += 'Check credentials, account status, or handle 2FA manually.';
-        
+      if (finalUrl.includes('/accounts/login') || finalUrl.includes('/challenge')) {
         return {
           success: false,
-          error: errorMsg,
-          diagnostics: {
-            ...diagnostics,
-          },
+          error: 'Login failed - still on login page. Check credentials or handle 2FA manually.',
           steps: { ...steps, login: 'failed' },
           duration_ms: Date.now() - startTime,
         };
