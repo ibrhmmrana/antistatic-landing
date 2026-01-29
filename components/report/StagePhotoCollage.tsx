@@ -272,28 +272,8 @@ export default function StagePhotoCollage({
     const fetchPhotos = async () => {
       setLoading(true);
       setError(null);
-      
-      // First, check if data was pre-loaded in localStorage
-      if (scanId) {
-        try {
-          const cachedData = localStorage.getItem(`photos_${scanId}`);
-          if (cachedData) {
-            const photosData: PhotosData = JSON.parse(cachedData);
-            
-            // Validate cached data
-            if (photosData.photos && Array.isArray(photosData.photos)) {
-              console.log("[photos] Using pre-loaded data from localStorage");
-              setData(photosData);
-              setLoading(false);
-              return;
-            }
-          }
-        } catch (e) {
-          console.warn("[photos] Failed to parse cached data, fetching fresh:", e);
-        }
-      }
-      
-      // If no cached data, fetch from API
+
+      // Always fetch from API first so prod gets New API data with photoUri (images display correctly)
       try {
         const response = await fetch(
           `/api/places/photos?placeId=${encodeURIComponent(placeId)}`
