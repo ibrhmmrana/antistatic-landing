@@ -211,49 +211,70 @@ export class InstagramSessionService {
       console.log('[SESSION] Submitting login form...');
       
       // Try to find and click the submit button
-      // Based on Instagram's current structure: div[role="none"] containing span with "Log in" text
+      // Based on Instagram's current structure: div[role="none"].x1ja2u2z containing span with "Log in" text
       let submitButtonFound = false;
       
       try {
-        // First, try to find the span containing "Log in" text
-        const loginSpan = await page.waitForSelector('span:has-text("Log in"), span:has-text("Log In")', { 
+        // Strategy 1: Find the outermost div[role="none"] with class x1ja2u2z that contains "Log in" text
+        const submitButton = await page.waitForSelector('div[role="none"].x1ja2u2z:has-text("Log in")', { 
           timeout: 5000, 
           state: 'visible' 
         });
         
-        if (loginSpan) {
-          console.log('[SESSION] Found "Log in" span, finding clickable parent...');
-          
-          // Find the clickable parent div[role="none"] that contains the span
-          const clickableParent = await loginSpan.evaluateHandle((el) => {
-            let parent = el.parentElement;
-            while (parent && parent !== document.body) {
-              // Look for the div[role="none"] with class x1ja2u2z (from user's HTML structure)
-              if (parent.getAttribute('role') === 'none' && parent.classList.contains('x1ja2u2z')) {
-                return parent;
-              }
-              parent = parent.parentElement;
-            }
-            // Fallback: return the span's immediate parent
-            return el.parentElement || el;
-          });
-          
-          const parentElement = await clickableParent.asElement();
-          if (parentElement) {
-            console.log('[SESSION] Clicking parent div[role="none"] element...');
-            await parentElement.click();
-            submitButtonFound = true;
-          } else {
-            // Fallback: click the span itself
-            await loginSpan.click();
-            submitButtonFound = true;
-          }
+        if (submitButton) {
+          console.log('[SESSION] Found submit button using div[role="none"].x1ja2u2z selector');
+          await submitButton.click();
+          submitButtonFound = true;
         }
       } catch (e) {
-        console.log('[SESSION] Could not find "Log in" span, trying alternative selectors...');
+        console.log('[SESSION] Strategy 1 failed, trying alternative approach...');
       }
       
-      // Fallback to standard button selectors
+      // Strategy 2: Find span with "Log in" text and traverse up to find clickable parent
+      if (!submitButtonFound) {
+        try {
+          const loginSpan = await page.waitForSelector('span:has-text("Log in"), span:has-text("Log In")', { 
+            timeout: 5000, 
+            state: 'visible' 
+          });
+          
+          if (loginSpan) {
+            console.log('[SESSION] Found "Log in" span, finding clickable parent...');
+            
+            // Find the clickable parent div[role="none"] with class x1ja2u2z
+            const clickableParent = await loginSpan.evaluateHandle((el) => {
+              let current = el;
+              // Traverse up the DOM tree
+              while (current && current !== document.body) {
+                // Check if current element is the target div
+                if (current.tagName === 'DIV' && 
+                    current.getAttribute('role') === 'none' && 
+                    current.classList.contains('x1ja2u2z')) {
+                  return current;
+                }
+                current = current.parentElement;
+              }
+              // Fallback: return the span's parent or the span itself
+              return el.parentElement || el;
+            });
+            
+            const parentElement = await clickableParent.asElement();
+            if (parentElement) {
+              console.log('[SESSION] Clicking parent div[role="none"].x1ja2u2z element...');
+              await parentElement.click();
+              submitButtonFound = true;
+            } else {
+              // Fallback: click the span itself
+              await loginSpan.click();
+              submitButtonFound = true;
+            }
+          }
+        } catch (e) {
+          console.log('[SESSION] Strategy 2 failed, trying standard button selectors...');
+        }
+      }
+      
+      // Strategy 3: Fallback to standard button selectors
       if (!submitButtonFound) {
         const submitSelectors = [
           'button[type="submit"]',
